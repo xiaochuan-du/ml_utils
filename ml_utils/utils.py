@@ -11,6 +11,22 @@ from keras.utils.np_utils import to_categorical
 import bcolz
 
 
+def vgg_preprocess(img):
+    """
+        Subtracts the mean RGB value, and transposes RGB to BGR.
+        The mean RGB was computed on the image set used to train the VGG model.
+
+        Args: 
+            x: Image array (height x width x channels)
+        Returns:
+            Image array (height x width x transposed_channels)
+    """
+    vgg_mean = np.array(
+        [123.68, 116.779, 103.939], dtype=np.float).reshape((3, 1, 1))
+    img = img - vgg_mean
+    return img[:, ::-1]  # reverse axis rgb->bgr
+
+
 def gray(img):
     " from colorful images to gray ones"
     to_bw = np.array([0.299, 0.587, 0.114])
@@ -44,6 +60,7 @@ def get_batches(dirname,
                 target_size=(224, 224)):
     " get image batches from directory, default \
         action is to resize images directly "
+
     return gen.flow_from_directory(
         dirname,
         target_size=target_size,
