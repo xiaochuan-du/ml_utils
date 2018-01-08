@@ -1,9 +1,6 @@
 """
-Viz func 
+Viz func
 """
-import itertools
-
-
 import matplotlib.pyplot as plt
 import numpy as np
 from keras import backend as K
@@ -15,6 +12,7 @@ def to_plot(img):
         return np.rollaxis(img, 0, 1).astype(np.uint8)
     else:
         return np.rollaxis(img, 0, 3).astype(np.uint8)
+
 
 def plot(img):
     " plot image"
@@ -32,13 +30,10 @@ def plots(ims, figsize=(12, 6), rows=1, interp=False, titles=None):
         if ims.shape[-1] != 3:
             ims = ims.transpose((0, 2, 3, 1))
     fig = plt.figure(figsize=figsize)
-    cols = len(ims)//rows if len(ims) % 2 == 0 else len(ims)//rows + 1
+    cols = len(ims) // rows if len(ims) % 2 == 0 else len(ims) // rows + 1
     for i, img in enumerate(ims):
-        subplot = fig.add_subplot(rows, cols, i+1)
+        subplot = fig.add_subplot(rows, cols, i + 1)
         subplot.axis('Off')
         if titles is not None:
             subplot.set_title(titles[i], fontsize=16)
         plt.imshow(img, interpolation=None if interp else 'none')
-
-
-

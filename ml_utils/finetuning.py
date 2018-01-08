@@ -11,6 +11,7 @@ from keras.models import Sequential, Model
 from keras.layers import Input, Embedding, Reshape, merge, LSTM, Bidirectional
 from keras.layers import TimeDistributed, Activation, SimpleRNN, GRU
 from keras.layers.core import Flatten, Dense, Dropout, Lambda
+from keras.layers.pooling import MaxPooling2D
 from keras.regularizers import l2, activity_l2, l1, activity_l1
 from keras.layers.normalization import BatchNormalization
 from keras.optimizers import SGD, RMSprop, Adam
@@ -24,14 +25,12 @@ from ml_utils.utils import layer_from_config, serialize
 def get_dense_layers(input_layers):
     " get dense layers on top"
     return [
-        MaxPooling2D(input_shape=input_layers.output_shape[1:]),
-        Flatten(),
-        Dense(4096, activation='relu'),
-        Dropout(0.5),
-        Dense(4096, activation='relu'),
-        Dropout(0.5),
-        Dense(1000, activation='softmax')
-        ]
+        MaxPooling2D(input_shape=input_layers.output_shape[1:]), Flatten(),
+        Dense(4096, activation='relu'), Dropout(0.5), Dense(
+            4096, activation='relu'), Dropout(0.5), Dense(
+                1000, activation='softmax')
+    ]
+
 
 def wrap_config(layer):
     " get dict of layer's name and its config"
@@ -80,17 +79,23 @@ def insert_layer(model, new_layer, index):
         copied.set_weights(layer.get_weights())
     return res
 
+
 def split_at(model, layer_type):
+    " split_at "
     layers = model.layers
-    layer_idx = [index for index,layer in enumerate(layers)
-                 if type(layer) is layer_type][-1]
-    return layers[:layer_idx+1], layers[layer_idx+1:]
+    layer_idx = [
+        index for index, layer in enumerate(layers)
+        if type(layer) is layer_type
+    ][-1]
+    return layers[:layer_idx + 1], layers[layer_idx + 1:]
+
 
 def vgg_ft(out_dim):
     vgg = Vgg16()
     vgg.ft(out_dim)
     model = vgg.model
     return model
+
 
 def vgg_ft_bn(out_dim):
     vgg = Vgg16BN()

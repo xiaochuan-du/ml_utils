@@ -8,8 +8,12 @@ from keras.preprocessing import image
 from ml_utils.viz import plots
 import matplotlib.pyplot as plt
 
-def plot_confusion_matrix(cm, classes, normalize=False, 
-        title='Confusion matrix', cmap=plt.cm.get_cmap('Blue')):
+
+def plot_confusion_matrix(cm,
+                          classes,
+                          normalize=False,
+                          title='Confusion matrix',
+                          cmap=plt.cm.get_cmap('Blue')):
     """
     This function prints and plots the confusion matrix.
     Normalization can be applied by setting `normalize=True`.
@@ -33,11 +37,17 @@ def plot_confusion_matrix(cm, classes, normalize=False,
     print(cm)
     thresh = cm.max() / 2.
     for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        plt.text(j, i, cm[i, j], horizontalalignment="center", color="white" if cm[i, j] > thresh else "black")
+        plt.text(
+            j,
+            i,
+            cm[i, j],
+            horizontalalignment="center",
+            color="white" if cm[i, j] > thresh else "black")
 
     plt.tight_layout()
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
+
 
 def plots_idx(idx, path, filenames, titles=None):
     """ plots_idx
@@ -54,10 +64,13 @@ def plots_idx(idx, path, filenames, titles=None):
     #3. The images we most confident were cats, and are actually cats
     correct_cats = np.where((preds==0) & (preds==val_labels[:,1]))[0]
     most_correct_cats = np.argsort(probs[correct_cats])[::-1][:n_view]
-    plots_idx(correct_cats[most_correct_cats], probs[correct_cats][most_correct_cats])
+    plots_idx(correct_cats[most_correct_cats],
+              probs[correct_cats][most_correct_cats])
 
     #5. The most uncertain labels (ie those with probability closest to 0.5).
     most_uncertain = np.argsort(np.abs(probs-0.5))
     plots_idx(most_uncertain[:n_view], probs[most_uncertain])
     """
-    plots([image.load_img(path + 'valid/' + filenames[i]) for i in idx], titles=titles)
+    plots(
+        [image.load_img(path + 'valid/' + filenames[i]) for i in idx],
+        titles=titles)
