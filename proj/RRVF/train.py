@@ -1,5 +1,6 @@
 import glob
 import re
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -30,8 +31,9 @@ if __name__ == '__main__':
         map_train,
         y_train,
         batch_size=128,
-        epochs=1,
+        epochs=6,
         validation_data=(map_valid, y_valid))
 
     hist.model.save_weights('./result/caching.h5')
     model.evaluate(map_valid, y_valid)
+    pickle.dump(hist, open('./result/hist1.pkl', 'wb'))

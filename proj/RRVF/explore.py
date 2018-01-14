@@ -1,5 +1,8 @@
 
 #%%
+import os
+os.chdir('proj/RRVF')
+#%%
 import glob
 import re
 
@@ -108,10 +111,20 @@ display(trn.head())
 # a = log_max_inv(y_pred, mx=max_log_y)
 # diff = a - y_valid_orig
 # # print(pred)
+#%%
+data_dir = r'/Users/kevindu/Documents/workspace/ml_utils/proj/RRVF/data'
+test_df['visitors'] = np.NaN
+feas = utils.data2fea(test_df, data_dir)
+contin_cols = feas['contin_cols']
+cat_map_fit = feas['cat_map_fit']
+# valid & trn splitting
 
-# #%%
+model = utils.get_model(contin_cols, cat_map_fit)
+#%%
 # plt.plot(y_valid_orig)
+model.load_weights('./result/caching.h5', by_name=True)
 
-# #%%
+#%%
 # display(DataFrameSummary(trn).summary())
+pred = model.predict(feas['x_map'])
 
