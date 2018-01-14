@@ -216,22 +216,23 @@ def mat2fea(mat):
     contin_map = contin_preproc(mat)
     return cat_map, contin_map, cat_cols, contin_cols, cat_map_fit, mat.visitors
 
-def ts_data_split(input_map, y):
+def ts_data_split(input_map, y, s_i, e_i):
     output = {
         'trn': [],
         'valid': []
     }
-    train_ratio = 0.9
-    size = y.shape[0]
-    trn_size = int(train_ratio * size)
+    # train_ratio = 0.9
+    # size = y.shape[0]
+    # trn_size = int(train_ratio * size)
     input_trn = []
-    input_tes = []
+    input_valid = []
+    y_trn = np.concatenate((y.iloc[:s_i].values, y.iloc[e_i:].values), axis=0)
+    y_valid = y.iloc[s_i: e_i]
     for fea in input_map:
-        input_trn.append(fea[:trn_size])
-        input_tes.append(fea[trn_size:])
-    y_trn = y[:trn_size]
-    y_tes = y[trn_size:]
-    return input_trn, input_tes, y_trn, y_tes
+        input_valid.append(fea[s_i:e_i])
+        input_trn.append( np.concatenate((fea[:s_i], fea[e_i:]), axis=0) )
+
+    return input_trn, input_valid, y_trn, y_valid
 
 def uniform_y(y_train_orig, y_valid_orig):
     max_log_y = max(np.max(np.log(y_train_orig)), np.max(np.log(y_valid_orig)))
@@ -350,6 +351,7 @@ def data2fea(trn, data_dir):
     feas = {
         'x_map': input_map,
         'y': y,
+        'times': trn.visit_date,
         'contin_cols': contin_cols,
         'cat_map_fit': cat_map_fit,
     }
