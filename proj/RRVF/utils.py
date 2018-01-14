@@ -7,6 +7,11 @@ from sklearn.preprocessing import LabelEncoder, Imputer, StandardScaler
 from keras.layers import Concatenate, Dense, Dropout, Embedding, Flatten, Input
 from keras import initializers
 from keras.models import Model
+
+cate_vars = ['genre_name', 'area_name', 'hpb_area_name', 'hpb_genre_name', ]
+conti_vars = ['latitude', 'longitude', 'hpb_latitude', 'hpb_longitude']
+
+
 class TimeToEvent(object):
     'iter across row'
     def __init__(self, fld, init_date):
@@ -211,18 +216,22 @@ def mat2fea(mat):
     contin_map = contin_preproc(mat)
     return cat_map, contin_map, cat_cols, contin_cols, cat_map_fit, mat.visitors
 
-def ts_data_split(datas):
+def ts_data_split(input_map, y):
     output = {
         'trn': [],
         'valid': []
     }
     train_ratio = 0.9
-    size = datas[0].shape[0]
+    size = y.shape[0]
     trn_size = int(train_ratio * size)
-    for data in datas:
-        output['trn'].append(data[:trn_size])
-        output['valid'].append(data[trn_size:])
-    return output
+    input_trn = []
+    input_tes = []
+    for fea in input_map:
+        input_trn.append(fea[:trn_size])
+        input_tes.append(fea[trn_size:])
+    y_trn = y[:trn_size]
+    y_tes = y[trn_size:]
+    return input_trn, input_tes, y_trn, y_tes
 
 def uniform_y(y_train_orig, y_valid_orig):
     max_log_y = max(np.max(np.log(y_train_orig)), np.max(np.log(y_valid_orig)))
@@ -284,4 +293,64 @@ def get_model(contin_cols, cat_map_fit):
     model.compile('adam', 'mse')
     return model
 
-def split_cols(arr): return np.hsplit(arr,arr.shape[1])
+def split_cols(arr):
+    return np.hsplit(arr,arr.shape[1])
+
+
+def data2fea(trn, data_dir):
+    data = {
+        # 'tra': pd.read_csv('{}/air_visit_data.csv'.format(data_dir)),
+        # 'tes': pd.read_csv('{}/sample_submission.csv'.format(data_dir)),
+        'as': pd.read_csv('{}/air_store_info.csv'.format(data_dir)),
+        'hs': pd.read_csv('{}/hpg_store_info.csv'.format(data_dir)),
+        'ar': pd.read_csv('{}/air_reserve.csv'.format(data_dir)),
+        'hr': pd.read_csv('{}/hpg_reserve.csv'.format(data_dir)),
+        'id': pd.read_csv('{}/store_id_relation.csv'.format(data_dir)),
+        'hol': pd.read_csv('{}/date_info.csv'.format(data_dir))
+    }
+    data = get_reserve_tbl(data)
+    get_info_from_date(trn, ['visit_date'])
+    hol = data["hol"]
+    hol.rename(
+        {
+            'calendar_date': 'Date', 
+    }, axis='columns', inplace=True)
+    hol.Date = pd.to_datetime(hol.Date)
+    fld = 'holiday_flg'
+    # get_store_stat_tbl(data)
+    hol = add_ts_elapsed(fld, ['af_', 'be_'], hol)
+    hol = add_ts_elapsed(fld, ['dur_'], hol)
+
+    # merge everything into store_info
+    store_info = data["reserve"][['air_store_id', "src",
+        'genre_name', 'area_name', 'latitude', 'longitude']]
+    store_info.drop_duplicates(inplace=True)
+    air_store_info = store_info[store_info.src == 'air']
+    hpg_store_info = store_info[(store_info.src == 'hpg') & (~ store_info.genre_name.isna())]
+
+    hpg_store_info.rename(
+        {
+            'latitude': 'hpb_latitude', 
+            'longitude': 'hpb_longitude',
+            'genre_name': 'hpb_genre_name',
+            'area_name': 'hpb_area_name',
+        }, axis='columns', inplace=True)
+    hpg_store_info.drop('src', axis=1, inplace=True, errors="ignore")
+    store_info = pd.merge(air_store_info, hpg_store_info, how='left')
+    store_info.drop('src', axis=1, inplace=True, errors="ignore")
+    store_info[cate_vars] = store_info[cate_vars].fillna('UD')
+    store_info[conti_vars] = store_info[conti_vars].fillna(0)
+
+
+    # from store_info and holiday_info to feature matrix
+    mat = trn2mat(trn, store_info, hol, cate_vars, conti_vars)
+    cat_map, contin_map, cat_cols, contin_cols, cat_map_fit, y = mat2fea(mat)
+
+    input_map = split_cols(cat_map) + [contin_map]
+    feas = {
+        'x_map': input_map,
+        'y': y,
+        'contin_cols': contin_cols,
+        'cat_map_fit': cat_map_fit,
+    }
+    return feas
