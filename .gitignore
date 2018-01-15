@@ -31,6 +31,9 @@ wheels/
 *.manifest
 *.spec
 
+proj/RRVF/data
+proj/RRVF/result
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
