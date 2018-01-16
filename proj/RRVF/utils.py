@@ -7,6 +7,7 @@ from sklearn.preprocessing import LabelEncoder, Imputer, StandardScaler
 from keras.layers import Concatenate, Dense, Dropout, Embedding, Flatten, Input, BatchNormalization
 from keras import initializers
 from keras.models import Model
+from keras import backend as K 
 
 cate_vars = ['genre_name', 'area_name', 'hpb_area_name', 'hpb_genre_name', ]
 conti_vars = ['latitude', 'longitude', 'hpb_latitude', 'hpb_longitude']
@@ -184,13 +185,13 @@ def trn2mat(trn_df, store_info, hol, cate_vars, conti_vars):
     trn[cate_vars] = trn[cate_vars].fillna('UD')
     trn[conti_vars] = trn[conti_vars].fillna(0)
     get_info_from_date(trn, ['visit_date'])
-    return trn.drop(['visit_date', 'Date', 'air_store_id'], axis=1)
+    return trn.drop(['visit_date', 'Date'], axis=1)
 
 def mat2fea(mat):
     cat_vars = ['genre_name', 'area_name', 'hpb_genre_name', 
     'hpb_area_name', 'holiday_flg', 'dur_time_holiday_flg',
     'visit_date_week', 'visit_date_dayofweek', 'visit_date_year', 
-    'visit_date_month']
+    'visit_date_month', 'air_store_id']
     contin_vars = ['latitude', 'longitude', 'hpb_latitude', 'hpb_longitude',
             'af_holiday_flg', 'be_holiday_flg', 'dur_holiday_flg', 'dur_prog_holiday_flg']
     for v in contin_vars: mat.loc[mat[v].isnull(), v] = 0
@@ -294,6 +295,11 @@ def get_model(contin_cols, cat_map_fit):
     model.compile('adam', 'mse')
     return model
 
+def root_mean_squared_logarithmic_error(y_true, y_pred):
+    first_log = K.log(K.clip(y_pred, K.epsilon(), None) + 1.)
+    second_log = K.log(K.clip(y_true, K.epsilon(), None) + 1.)
+    return K.sqrt(K.mean(K.square(first_log - second_log), axis=-1))
+
 def get_bn_model(contin_cols, cat_map_fit):
     contin_inp = Input((contin_cols, ), name='contin')
     contin_out = Dense(
@@ -315,7 +321,7 @@ def get_bn_model(contin_cols, cat_map_fit):
     x = Dense(1, activation='sigmoid')(x)
 
     model = Model([inp for inp, emb in embs] + [contin_inp], x)
-    model.compile('adam', 'mse')
+    model.compile('adam', loss='mse')
     return model
 
 def split_cols(arr):
