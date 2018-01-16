@@ -4,7 +4,7 @@ from sklearn_pandas import DataFrameMapper
 from sklearn.preprocessing import LabelEncoder, Imputer, StandardScaler
 
 
-from keras.layers import Concatenate, Dense, Dropout, Embedding, Flatten, Input
+from keras.layers import Concatenate, Dense, Dropout, Embedding, Flatten, Input, BatchNormalization
 from keras import initializers
 from keras.models import Model
 
@@ -235,7 +235,7 @@ def ts_data_split(input_map, y, s_i, e_i):
     return input_trn, input_valid, y_trn, y_valid
 
 def uniform_y(y_train_orig, y_valid_orig):
-    max_log_y = max(np.max(np.log(y_train_orig)), np.max(np.log(y_valid_orig)))
+    max_log_y = max(np.max(np.log(y_train_orig)), np.max(np.log(y_valid_orig))) * 1.25
     return np.log(y_train_orig)/max_log_y, np.log(y_valid_orig)/max_log_y, max_log_y
 
 def rmsle(y_pred, targ):
@@ -287,6 +287,30 @@ def get_model(contin_cols, cat_map_fit):
     x = Dropout(0.02)(x)
     x = Dense(1000, activation='relu', kernel_initializer='uniform')(x)
     x = Dense(500, activation='relu', kernel_initializer='uniform')(x)
+    x = Dropout(0.2)(x)
+    x = Dense(1, activation='sigmoid')(x)
+
+    model = Model([inp for inp, emb in embs] + [contin_inp], x)
+    model.compile('adam', 'mse')
+    return model
+
+def get_bn_model(contin_cols, cat_map_fit):
+    contin_inp = Input((contin_cols, ), name='contin')
+    contin_out = Dense(
+        contin_cols * 10, activation='relu', name='contin_d', kernel_initializer='he_uniform')(contin_inp)
+    contin_out = BatchNormalization()(contin_out)
+    #contin_out = BatchNormalization()(contin_out)
+    embs = [get_emb(feat) for feat in cat_map_fit.features]
+    #conts = [get_contin(feat) for feat in contin_map_fit.features]
+    #contin_d = [d for inp,d in conts]
+    x = Concatenate()([emb for inp, emb in embs] + [contin_out])
+
+    x = Dropout(0.02)(x)
+    x = BatchNormalization()(x)
+    x = Dense(1000, activation='relu', kernel_initializer='he_uniform')(x)
+    x = BatchNormalization()(x)
+    x = Dense(500, activation='relu', kernel_initializer='he_uniform')(x)
+    x = BatchNormalization()(x)
     x = Dropout(0.2)(x)
     x = Dense(1, activation='sigmoid')(x)
 
