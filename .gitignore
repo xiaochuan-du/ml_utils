@@ -34,6 +34,7 @@ wheels/
 
 proj/RRVF/data
 proj/RRVF/result
+proj/RRVF/logs/
 
 # Installer logs
 pip-log.txt
