@@ -13,7 +13,8 @@ from keras.optimizers import Adam
 
 FORCE_CAT = [
     'dur_time_holiday_flg', 'visit_date_week', 'visit_date_dayofweek',
-    'visit_date_month'
+    'visit_date_month', 'dur_holiday_flg', 'dur_prog_holiday_flg', 
+    'air_loc', 'hpb_loc'
 ]
 FORCE_Y = ['visitors']
 
@@ -231,6 +232,7 @@ def inspect_var_type(data, force_cat=FORCE_CAT, force_y=FORCE_Y):
     }
     guess_cat_vars = var_types['bool'] + var_types['categorical'] + \
         var_types['date'] + var_types['constant'] + force_cat
+    guess_cat_vars = list(set(guess_cat_vars))
     guess_contin_vars = list(
         set(data.columns) - set(guess_cat_vars) - set(force_y))
     # cat_vars = [
@@ -458,6 +460,32 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None):
         hpg_store_info = hpg_store_info.drop('src', axis=1, errors="ignore")
         store_info = pd.merge(air_store_info, hpg_store_info, how='left')
         store_info = store_info.drop('src', axis=1, errors="ignore")
+
+        # region by location
+        for loc_vars in [['latitude', 'longitude'],
+                         ['hpb_latitude', 'hpb_longitude']]:
+            if len(loc_vars[0].split('_')) > 1:
+                src = loc_vars[0].split('_')[0]
+            else:
+                src = 'air'
+            store_info[loc_vars] = store_info[loc_vars].astype('str')
+            store_info['{}_loc'.format(src)] = store_info[loc_vars].apply(
+                lambda x: '_'.join(x), axis=1)
+            store_info = store_info.drop(loc_vars, axis=1, errors='ignore')
+
+        # stores' number in region/ area
+        for grp_key in ['air_loc', 'hpb_loc', 'area_name', 'hpb_area_name']:
+            var_name = 'stores_in_{}'.format(grp_key)
+            agg = store_info.groupby(grp_key)[
+                'air_store_id'].count()
+            agg = pd.DataFrame(agg, columns=[agg.name])
+            agg = agg.reset_index()
+            agg = agg.rename(
+                {
+                    'air_store_id': var_name,
+                }, axis="columns")
+            store_info = pd.merge(store_info, agg, on=grp_key, how='left')
+
         tidy_df = pd.merge(tidy_df, store_info, how='left', on='air_store_id')
 
         # holiday related features
@@ -478,6 +506,21 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None):
             how='left',
             left_on='visit_date',
             right_on='Date')
+
+        # region/ area's statis
+        for key in [
+                'air_loc', 'hpb_loc', 'area_name', 'hpb_area_name'
+        ]:
+            agg = tidy_df.groupby(key)['visitors'].agg(
+                [np.min, np.max, np.mean, np.std]).rename(
+                    columns={
+                        'amin': 'min_{}_in_{}'.format('visits', key),
+                        'amax': 'max_{}_in_{}'.format('visits', key),
+                        'mean': 'mean_{}_in_{}'.format('visits', key),
+                        'std': 'std_{}_in_{}'.format('visits', key)
+                    })
+            agg.reset_index(inplace=True)
+            tidy_df = pd.merge(tidy_df, agg, how='left', on=key)
         # fill datetime splitted data
         get_info_from_date(tidy_df, ['visit_date'])
         # fill NaN and drop useless columns
