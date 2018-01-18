@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from sklearn_pandas import DataFrameMapper
 from sklearn.preprocessing import LabelEncoder, Imputer, StandardScaler
-
+import math
 
 from keras.layers import Concatenate, Dense, Dropout, Embedding, Flatten, Input, BatchNormalization
 from keras import initializers
@@ -397,11 +397,20 @@ def data2fea(trn, data_dir):
     cat_map, contin_map, cat_cols, contin_cols, cat_map_fit, y = mat2fea(mat)
 
     input_map = split_cols(cat_map) + [contin_map]
+    cat_vars = ['genre_name', 'area_name', 'hpb_genre_name', 
+    'hpb_area_name', 'holiday_flg', 'dur_time_holiday_flg',
+    'visit_date_week', 'visit_date_dayofweek', 'visit_date_year', 
+    'visit_date_month', 'air_store_id']
+    contin_vars = ['latitude', 'longitude', 'hpb_latitude', 'hpb_longitude',
+            'af_holiday_flg', 'be_holiday_flg', 'dur_holiday_flg', 'dur_prog_holiday_flg',
+            'min_visits', 'max_visits', 'mean_visits', 'std_visits']
     feas = {
         'x_map': input_map,
         'y': y,
         'times': trn.visit_date,
         'contin_cols': contin_cols,
         'cat_map_fit': cat_map_fit,
+        'x_fit': np.concatenate([cat_map, contin_map], axis=1),
+        'all_vars': cat_vars + contin_vars 
     }
     return feas
