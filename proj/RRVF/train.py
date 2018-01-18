@@ -32,8 +32,8 @@ if __name__ == '__main__':
     with open('./result/model_bn.yml', 'w') as file_obj:
         file_obj.write(yaml_string)
     model.load_weights('./result/model_bn.h5')
-    seed = np.random.rand()*(1) - 4
-    model.optimizer.lr, epochs = np.power(10, seed), 600 # np.power(10, seed)
+    seed = np.random.rand()*(1) - 5
+    model.optimizer.lr, epochs = np.power(10, seed), 500 # np.power(10, seed)
     tensorboard = TensorBoard(log_dir='./logs', histogram_freq=0,
                           write_graph=True, write_images=False)
     checkpoint = ModelCheckpoint('./result/model_bn.h5', save_best_only=True, monitor='loss', save_weights_only=True)

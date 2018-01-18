@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*/logs/*
 
 # C extensions
 *.so
@@ -33,6 +34,7 @@ wheels/
 
 proj/RRVF/data
 proj/RRVF/result
+proj/RRVF/logs/
 
 # Installer logs
 pip-log.txt

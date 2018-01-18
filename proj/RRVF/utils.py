@@ -2,12 +2,13 @@ import numpy as np
 import pandas as pd
 from sklearn_pandas import DataFrameMapper
 from sklearn.preprocessing import LabelEncoder, Imputer, StandardScaler
-
+import math
 
 from keras.layers import Concatenate, Dense, Dropout, Embedding, Flatten, Input, BatchNormalization
 from keras import initializers
 from keras.models import Model
-
+from keras import backend as K 
+from keras.optimizers import Adam
 cate_vars = ['genre_name', 'area_name', 'hpb_area_name', 'hpb_genre_name', ]
 conti_vars = ['latitude', 'longitude', 'hpb_latitude', 'hpb_longitude']
 
@@ -184,15 +185,16 @@ def trn2mat(trn_df, store_info, hol, cate_vars, conti_vars):
     trn[cate_vars] = trn[cate_vars].fillna('UD')
     trn[conti_vars] = trn[conti_vars].fillna(0)
     get_info_from_date(trn, ['visit_date'])
-    return trn.drop(['visit_date', 'Date', 'air_store_id'], axis=1)
+    return trn.drop(['visit_date', 'Date'], axis=1)
 
 def mat2fea(mat):
     cat_vars = ['genre_name', 'area_name', 'hpb_genre_name', 
     'hpb_area_name', 'holiday_flg', 'dur_time_holiday_flg',
     'visit_date_week', 'visit_date_dayofweek', 'visit_date_year', 
-    'visit_date_month']
+    'visit_date_month', 'air_store_id']
     contin_vars = ['latitude', 'longitude', 'hpb_latitude', 'hpb_longitude',
-            'af_holiday_flg', 'be_holiday_flg', 'dur_holiday_flg', 'dur_prog_holiday_flg']
+            'af_holiday_flg', 'be_holiday_flg', 'dur_holiday_flg', 'dur_prog_holiday_flg',
+            'min_visits', 'max_visits', 'mean_visits', 'std_visits']
     for v in contin_vars: mat.loc[mat[v].isnull(), v] = 0
     for v in cat_vars: mat.loc[mat[v].isnull(), v] = ""
     cat_maps = [(o, LabelEncoder()) for o in cat_vars]
@@ -294,6 +296,11 @@ def get_model(contin_cols, cat_map_fit):
     model.compile('adam', 'mse')
     return model
 
+def root_mean_squared_logarithmic_error(y_true, y_pred):
+    first_log = K.log(K.clip(y_pred, K.epsilon(), None) + 1.)
+    second_log = K.log(K.clip(y_true, K.epsilon(), None) + 1.)
+    return K.sqrt(K.mean(K.square(first_log - second_log), axis=-1))
+
 def get_bn_model(contin_cols, cat_map_fit):
     contin_inp = Input((contin_cols, ), name='contin')
     contin_out = Dense(
@@ -315,7 +322,7 @@ def get_bn_model(contin_cols, cat_map_fit):
     x = Dense(1, activation='sigmoid')(x)
 
     model = Model([inp for inp, emb in embs] + [contin_inp], x)
-    model.compile('adam', 'mse')
+    model.compile(Adam(decay=1e-6), loss='mse')
     return model
 
 def split_cols(arr):
@@ -324,7 +331,7 @@ def split_cols(arr):
 
 def data2fea(trn, data_dir):
     data = {
-        # 'tra': pd.read_csv('{}/air_visit_data.csv'.format(data_dir)),
+        'tra': pd.read_csv('{}/air_visit_data.csv'.format(data_dir)),
         # 'tes': pd.read_csv('{}/sample_submission.csv'.format(data_dir)),
         'as': pd.read_csv('{}/air_store_info.csv'.format(data_dir)),
         'hs': pd.read_csv('{}/hpg_store_info.csv'.format(data_dir)),
@@ -333,6 +340,23 @@ def data2fea(trn, data_dir):
         'id': pd.read_csv('{}/store_id_relation.csv'.format(data_dir)),
         'hol': pd.read_csv('{}/date_info.csv'.format(data_dir))
     }
+    # static of trn
+    key = 'air_store_id'
+    agg = data['tra'].groupby(key).agg([np.min, np.max, np.mean, np.std]).rename(
+      columns={
+        'amin': 'min_{}'.format('visits'),
+        'amax': 'max_{}'.format('visits'),
+        'mean': 'mean_{}'.format('visits'),
+        'std': 'std_{}'.format('visits')
+    })
+    agg.reset_index(inplace=True)
+    agg.columns = agg.columns.droplevel()
+    agg = agg.reset_index()
+    agg.rename(
+        {
+            '': key,
+    }, axis='columns', inplace=True)
+    trn = pd.merge(trn, agg[['min_visits', 'max_visits', 'mean_visits', 'std_visits', key]], how='left')
     data = get_reserve_tbl(data)
     get_info_from_date(trn, ['visit_date'])
     hol = data["hol"]
@@ -369,14 +393,24 @@ def data2fea(trn, data_dir):
 
     # from store_info and holiday_info to feature matrix
     mat = trn2mat(trn, store_info, hol, cate_vars, conti_vars)
+    mat.to_csv('./result/be_feat.csv')
     cat_map, contin_map, cat_cols, contin_cols, cat_map_fit, y = mat2fea(mat)
 
     input_map = split_cols(cat_map) + [contin_map]
+    cat_vars = ['genre_name', 'area_name', 'hpb_genre_name', 
+    'hpb_area_name', 'holiday_flg', 'dur_time_holiday_flg',
+    'visit_date_week', 'visit_date_dayofweek', 'visit_date_year', 
+    'visit_date_month', 'air_store_id']
+    contin_vars = ['latitude', 'longitude', 'hpb_latitude', 'hpb_longitude',
+            'af_holiday_flg', 'be_holiday_flg', 'dur_holiday_flg', 'dur_prog_holiday_flg',
+            'min_visits', 'max_visits', 'mean_visits', 'std_visits']
     feas = {
         'x_map': input_map,
         'y': y,
         'times': trn.visit_date,
         'contin_cols': contin_cols,
         'cat_map_fit': cat_map_fit,
+        'x_fit': np.concatenate([cat_map, contin_map], axis=1),
+        'all_vars': cat_vars + contin_vars 
     }
     return feas
