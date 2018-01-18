@@ -164,6 +164,8 @@ step = 10
 DataFrameSummary(tidy_data[tidy_data.columns[start:start + step]]).summary()
 
 #%%
+from importlib import reload
+reload(utils)
 # from location to area
 """
 store_of_same_genre_in_area , store_of_same_genre_in_area
@@ -177,7 +179,18 @@ store_of_same_genre_in_area , store_of_same_genre_in_area
 #                     'air_store_id': var_name,
 #                 }, axis='columns')
 #         tidy_data = pd.merge(tidy_data, agg, on=[grp_key, genre_key], how='left')
-
+feats = feas['nn_fea']
+y = feas['y']
+date_sr = pd.to_datetime(tidy_data.Date)
+dat = utils.data_split_by_date(feats, y, date_sr, trn2val_ratio=9, step_days=50)
+len(dat)
+# output = {'trn': [], 'valid': []}
+# input_trn = []
+# input_valid = []
+# y_trn = np.concatenate((y.iloc[:s_i].values, y.iloc[e_i:].values), axis=0)
+# y_valid = y.iloc[s_i:e_i]
+# for fea in input_map:
+#     input_valid.append(fea[s_i:e_i])
 
 #%%
 tidy_data.columns
