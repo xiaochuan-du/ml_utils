@@ -13,8 +13,8 @@ from keras.optimizers import Adam
 
 FORCE_CAT = [
     'dur_time_holiday_flg', 'visit_date_week', 'visit_date_dayofweek',
-    'visit_date_month', 'dur_holiday_flg', 'dur_prog_holiday_flg', 
-    'air_loc', 'hpb_loc'
+    'visit_date_month', 'dur_holiday_flg', 'dur_prog_holiday_flg', 'air_loc',
+    'hpb_loc'
 ]
 FORCE_Y = ['visitors']
 
@@ -292,6 +292,38 @@ def ts_data_split(input_map, y, s_i, e_i):
     return input_trn, input_valid, y_trn, y_valid
 
 
+def data_split_by_date(feats, y, date_sr, trn2val_ratio=9, step_days=50):
+    " according to date, split data"
+    data_blocks = []
+    delta = pd.to_timedelta('{} days'.format(step_days))
+    curdt = date_sr.min()
+    while curdt < date_sr.max():
+        data_index = date_sr[(date_sr >= curdt) &
+                             (date_sr < curdt + delta)].index.tolist()
+        trn_size = int(trn2val_ratio / 10.0 * len(data_index))
+        trn_index = data_index[:trn_size]
+        valid_index = data_index[trn_size:]
+        y_trn = y[pd.Index(trn_index)]
+        y_valid = y[pd.Index(valid_index)]
+        if isinstance(feats, list):
+            x_trn = []
+            x_valid = []
+            for feat in feats:
+                x_trn.append(feat[pd.Index(trn_index)])
+                x_valid.append(feat[pd.Index(valid_index)])
+        else:
+            x_trn = feats[pd.Index(trn_index)]
+            x_valid = feats[pd.Index(valid_index)]
+        data_blocks.append({
+            "x_trn": x_trn,
+            "y_trn": y_trn,
+            "x_valid": x_valid,
+            "y_valid": y_valid,
+        })
+        curdt = curdt + delta
+    return data_blocks
+
+
 def uniform_y(y_train_orig, y_valid_orig):
     max_log_y = max(
         np.max(np.log(y_train_orig)), np.max(np.log(y_valid_orig))) * 1.25
@@ -476,8 +508,7 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None):
         # stores' number in region/ area
         for grp_key in ['air_loc', 'hpb_loc', 'area_name', 'hpb_area_name']:
             var_name = 'stores_in_{}'.format(grp_key)
-            agg = store_info.groupby(grp_key)[
-                'air_store_id'].count()
+            agg = store_info.groupby(grp_key)['air_store_id'].count()
             agg = pd.DataFrame(agg, columns=[agg.name])
             agg = agg.reset_index()
             agg = agg.rename(
@@ -508,9 +539,7 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None):
             right_on='Date')
 
         # region/ area's statis
-        for key in [
-                'air_loc', 'hpb_loc', 'area_name', 'hpb_area_name'
-        ]:
+        for key in ['air_loc', 'hpb_loc', 'area_name', 'hpb_area_name']:
             agg = tidy_df.groupby(key)['visitors'].agg(
                 [np.min, np.max, np.mean, np.std]).rename(
                     columns={
@@ -523,13 +552,15 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None):
             tidy_df = pd.merge(tidy_df, agg, how='left', on=key)
         # fill datetime splitted data
         get_info_from_date(tidy_df, ['visit_date'])
-        # fill NaN and drop useless columns
+        # sort data according to their date
+        tidy_df = tidy_df.sort_values('visit_date')
         mat = tidy_df.drop(['visit_date', 'Date'], axis=1)
 
         if dev_func:
             mat = dev_func(mat)
 
         cat_vars, contin_vars = inspect_var_type(mat)
+        # fill NaN and drop useless columns
         mat[cat_vars] = mat[cat_vars].fillna('UD')
         mat[contin_vars] = mat[contin_vars].fillna(0)
     else:
@@ -545,7 +576,7 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None):
         'times': trn.visit_date,
         'contin_cols': contin_cols,
         'cat_map_fit': cat_map_fit,
-        'tidy_data': mat,
+        'tidy_data': tidy_df,
         'all_vars': cat_vars + contin_vars
     }
     return feas
