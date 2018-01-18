@@ -250,9 +250,8 @@ def inspect_var_type(data, force_cat=FORCE_CAT, force_y=FORCE_Y):
     return guess_cat_vars, guess_contin_vars
 
 
-def mat2fea(mat):
+def mat2fea(mat, cat_vars, contin_vars):
     " from feature dataframe to matrix based on type"
-    cat_vars, contin_vars = inspect_var_type(mat)
     mat[contin_vars] = mat[contin_vars].astype('float')
     for v in contin_vars:
         mat.loc[mat[v].isnull(), v] = 0
@@ -326,8 +325,8 @@ def data_split_by_date(feats, y, date_sr, trn2val_ratio=9, step_days=50):
 
 def uniform_y(y_train_orig, y_valid_orig):
     max_log_y = max(
-        np.max(np.log(y_train_orig)), np.max(np.log(y_valid_orig))) * 1.25
-    return np.log(y_train_orig) / max_log_y, np.log(
+        np.max(np.log1p(y_train_orig)), np.max(np.log1p(y_valid_orig))) * 1.25
+    return np.log1p(y_train_orig) / max_log_y, np.log1p(
         y_valid_orig) / max_log_y, max_log_y
 
 
@@ -337,7 +336,7 @@ def rmsle(y_pred, targ):
 
 
 def log_max_inv(preds, mx):
-    return np.exp(preds * mx)
+    return np.exp(preds * mx) - 1
 
 
 def my_init(scale):
@@ -429,7 +428,7 @@ def split_cols(arr):
     return np.hsplit(arr, arr.shape[1])
 
 
-def data2fea(trn, data_dir, run_para={}, dev_func=None):
+def data2fea(trn, data_dir, run_para={}, dev_func=None, drop_vars=None):
     " data cleansing and enrichment"
     af_etl = run_para.get("af_etl", None)
     use_cacheing = run_para.get("use_cacheing", None)
@@ -558,7 +557,7 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None):
 
         if dev_func:
             mat = dev_func(mat)
-
+        
         cat_vars, contin_vars = inspect_var_type(mat)
         # fill NaN and drop useless columns
         mat[cat_vars] = mat[cat_vars].fillna('UD')
@@ -567,7 +566,12 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None):
         mat.read_csv(use_cacheing)
     if af_etl:
         mat.to_csv(af_etl)
-    cat_map, contin_map, cat_cols, contin_cols, cat_map_fit, y = mat2fea(mat)
+    if drop_vars:
+        mat = mat.drop(drop_vars, axis='columns', errors='ignore')
+        cat_vars = list(set(cat_vars)-set(drop_vars))
+        contin_vars = list(set(contin_vars)-set(drop_vars))
+        
+    cat_map, contin_map, cat_cols, contin_cols, cat_map_fit, y = mat2fea(mat, cat_vars, contin_vars)
 
     feas = {
         'nn_fea': split_cols(cat_map) + [contin_map],

@@ -11,7 +11,7 @@ import utils
 from keras.callbacks import TensorBoard, ModelCheckpoint
 
 if __name__ == '__main__':
-    model_file, usewgt = 'model_bn', False
+    model_file, usewgt = 'newmodel_bn', True
     data_dir = r'./data'
     trn = pd.read_csv('{}/air_visit_data.csv'.format(data_dir))
     # use_cacheing
@@ -27,8 +27,8 @@ if __name__ == '__main__':
     dat = utils.data_split_by_date(
         nn_fea, y, date_sr, trn2val_ratio=9, step_days=50)
     # valid & trn splitting
-    map_train, y_train_orig, map_valid, y_valid_orig = dat[0]
-
+    dat_d = dat[0]
+    map_train, y_train_orig, map_valid, y_valid_orig = dat_d['x_trn'], dat_d['y_trn'], dat_d['x_valid'], dat_d['y_valid']
     y_train, y_valid, max_log_y = utils.uniform_y(y_train_orig, y_valid_orig)
 
     model = utils.get_bn_model(contin_cols, cat_map_fit)
