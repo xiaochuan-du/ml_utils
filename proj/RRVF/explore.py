@@ -1,4 +1,3 @@
-
 #%%
 import os
 os.chdir('proj/RRVF')
@@ -19,7 +18,14 @@ reload(utils)
 #%%
 ENV = 'dev'
 DATA_DIR = r'/Users/kevindu/Documents/workspace/ml_utils/proj/RRVF/data'
-cate_vars = ['genre_name', 'area_name', 'hpb_area_name', 'hpb_genre_name', ]
+DATA_DIR = r'E:\workspace\ai\ml_utils\proj\RRVF\data'
+
+cate_vars = [
+    'genre_name',
+    'area_name',
+    'hpb_area_name',
+    'hpb_genre_name',
+]
 conti_vars = ['latitude', 'longitude', 'hpb_latitude', 'hpb_longitude']
 
 if ENV == 'dev':
@@ -43,7 +49,6 @@ for tbl, df in data.items():
     display(df.head())
 
 #%%
-
 
 #%%
 test_df = utils.tes2trn(data['tes'])
@@ -93,8 +98,10 @@ display(set(test_df.air_store_id.tolist()) - set(trn.air_store_id.tolist()))
 
 hol = data['hol']
 hol.calendar_date = pd.to_datetime(hol.calendar_date)
-hol_about_test = hol[ (hol.calendar_date>='2017-05-01') & (hol.calendar_date<='2017-05-31')]
-hol_about_valid = hol[ (hol.calendar_date>='2016-05-01') & (hol.calendar_date<='2016-05-31')]
+hol_about_test = hol[(hol.calendar_date >= '2017-05-01') &
+                     (hol.calendar_date <= '2017-05-31')]
+hol_about_valid = hol[(hol.calendar_date >= '2016-05-01') &
+                      (hol.calendar_date <= '2016-05-31')]
 
 display(hol_about_test.head(10))
 display(hol_about_test.tail(10))
@@ -105,14 +112,12 @@ display(hol_about_valid.tail(10))
 #%%
 display(trn.head())
 
-
 # y_pred = model.predict(map_valid)
 # # rmsle(y_pred, targ = y_valid_orig)
 # a = log_max_inv(y_pred, mx=max_log_y)
 # diff = a - y_valid_orig
 # # print(pred)
 #%%
-data_dir = r'/Users/kevindu/Documents/workspace/ml_utils/proj/RRVF/data'
 test_df['visitors'] = np.NaN
 feas = utils.data2fea(test_df, data_dir)
 contin_cols = feas['contin_cols']
@@ -128,3 +133,58 @@ model.load_weights('./result/caching.h5', by_name=True)
 # display(DataFrameSummary(trn).summary())
 pred = model.predict(feas['x_map'])
 
+#%%
+import os
+os.chdir(r'E:\workspace\ai\ml_utils\proj\RRVF')
+import glob
+import re
+import pickle
+
+import numpy as np
+import pandas as pd
+from isoweek import Week
+from pandas_summary import DataFrameSummary
+from keras.models import model_from_yaml
+import utils
+# import xgboost
+import random
+from importlib import reload
+reload(utils)
+
+data_dir = r'./data'
+trn = pd.read_csv('{}/air_visit_data.csv'.format(data_dir))
+feas = utils.data2fea(trn, data_dir)
+print(feas.keys())
+tidy_data = feas['tidy_data']
+tidy_data.head()
+
+#%%
+start = 40
+step = 10
+DataFrameSummary(tidy_data[tidy_data.columns[start:start + step]]).summary()
+
+#%%
+# from location to area
+"""
+store_of_same_genre_in_area , store_of_same_genre_in_area
+"""
+# for grp_key in ['air_loc', 'hpb_loc', 'area_name', 'hpb_area_name']:
+#     for genre_key in ['genre_name', 'hpb_genre_name']:
+#         var_name = 'stores_of_{}_in_{}'.format(genre_key, grp_key)
+#         agg = tidy_data[['air_store_id', grp_key, genre_key]].groupby([grp_key, genre_key])[
+#             'air_store_id'].count().reset_index().rename(
+#                 {
+#                     'air_store_id': var_name,
+#                 }, axis='columns')
+#         tidy_data = pd.merge(tidy_data, agg, on=[grp_key, genre_key], how='left')
+
+
+#%%
+tidy_data.columns
+
+
+#%%
+
+store_info.head()
+
+#%%
