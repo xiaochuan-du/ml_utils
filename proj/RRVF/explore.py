@@ -128,3 +128,38 @@ model.load_weights('./result/caching.h5', by_name=True)
 # display(DataFrameSummary(trn).summary())
 pred = model.predict(feas['x_map'])
 
+
+#%%
+import os
+os.chdir(r'E:\workspace\ai\ml_utils\proj\RRVF')
+import glob
+import re
+import pickle
+
+import numpy as np
+import pandas as pd
+from isoweek import Week
+from pandas_summary import DataFrameSummary
+from keras.models import model_from_yaml
+import utils
+# import xgboost
+import random
+from importlib import reload
+reload(utils)
+
+data_dir = r'./data'
+trn = pd.read_csv('{}/air_visit_data.csv'.format(data_dir))
+feas = utils.data2fea(trn, data_dir)
+print(feas.keys())
+
+#%%
+tidy_data = feas['tidy_data']
+tidy_data.head()
+
+#%%
+start = 20
+step = 10
+DataFrameSummary(tidy_data[tidy_data.columns[start:start+step]]).summary()
+
+
+# from location to area
