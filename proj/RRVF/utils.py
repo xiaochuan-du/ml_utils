@@ -445,6 +445,7 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None, drop_vars=None):
             'hol': pd.read_csv('{}/date_info.csv'.format(data_dir))
         }
         # todo fix test init values
+        trn_org = trn.copy()
         trn.visit_date = pd.to_datetime(trn.visit_date)
         def func(a_store_df, period='60d'):
             a_store_df = a_store_df.set_index('visit_date')
@@ -466,7 +467,7 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None, drop_vars=None):
             return a_store_df
         trn = trn.groupby('air_store_id').apply(func)
         trn.index = trn.index.droplevel()
-
+        trn = pd.merge(trn_org, trn, how='left')
         # store historical vitors statistics
         key = 'air_store_id'
         agg = data['tra'].groupby(key).agg([np.min, np.max, np.mean,
