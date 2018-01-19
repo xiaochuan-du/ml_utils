@@ -570,7 +570,10 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None, drop_vars=None):
         mat = mat.drop(drop_vars, axis='columns', errors='ignore')
         cat_vars = list(set(cat_vars)-set(drop_vars))
         contin_vars = list(set(contin_vars)-set(drop_vars))
-        
+    
+    # reorder columns
+    mat = mat.reindex(sorted(mat.columns), axis=1)
+
     cat_map, contin_map, cat_cols, contin_cols, cat_map_fit, y = mat2fea(mat, cat_vars, contin_vars)
 
     feas = {
