@@ -466,8 +466,12 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None, drop_vars=None):
                 a_store_df = pd.merge(a_store_df, stat, on='visit_date', how='left')
             return a_store_df
         trn = trn.groupby('air_store_id').apply(func)
+        print(trn.head())
         trn.index = trn.index.droplevel()
-        trn = pd.merge(trn_org, trn, how='left')
+        trn = trn.drop('visitors', axis='columns', errors='ignore')
+        trn.visit_date = trn.visit_date.astype('str')
+        trn = pd.merge(trn_org, trn, how='left', on=['air_store_id', 'visit_date'])
+        print(trn.head())
         # store historical vitors statistics
         key = 'air_store_id'
         agg = data['tra'].groupby(key).agg([np.min, np.max, np.mean,
