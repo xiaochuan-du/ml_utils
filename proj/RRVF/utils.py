@@ -444,6 +444,29 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None, drop_vars=None):
             'id': pd.read_csv('{}/store_id_relation.csv'.format(data_dir)),
             'hol': pd.read_csv('{}/date_info.csv'.format(data_dir))
         }
+        # todo fix test init values
+        trn.visit_date = pd.to_datetime(trn.visit_date)
+        def func(a_store_df, period='60d'):
+            a_store_df = a_store_df.set_index('visit_date')
+            rolling_max = a_store_df["visitors"].rolling(period).max().shift(1)
+            rolling_min = a_store_df["visitors"].rolling(period).min().shift(1)
+            rolling_median = a_store_df["visitors"].rolling(period).median().shift(1)
+            rolling_std = a_store_df["visitors"].rolling(period).std().shift(1)
+            a_store_df = a_store_df.reset_index()
+            for stat, var_name in zip([rolling_max, rolling_min, rolling_median, rolling_std], 
+                        ["rolling_{}_max".format(period), "rolling_{}_min".format(period), 
+                         "rolling_{}_median".format(period), "rolling_{}_std".format(period)]):
+                stat = pd.DataFrame(stat).reset_index()
+                stat = stat.rename(
+                    {
+                        'visitors': var_name,
+                    }, axis="columns"
+                )
+                a_store_df = pd.merge(a_store_df, stat, on='visit_date', how='left')
+            return a_store_df
+        trn = trn.groupby('air_store_id').apply(func)
+        trn.index = trn.index.droplevel()
+
         # store historical vitors statistics
         key = 'air_store_id'
         agg = data['tra'].groupby(key).agg([np.min, np.max, np.mean,
