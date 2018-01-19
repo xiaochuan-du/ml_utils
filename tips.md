@@ -1,4 +1,4 @@
-## Hyperparameter tunning
+## NN Hyperparameter tunning
 ### Learning Rate
 To randomly try lr, make sure sample lr in a log scale, the python implementation is:
 ```
@@ -21,3 +21,6 @@ def mean_squared_logarithmic_error(y_true, y_pred):
     second_log = K.log(K.clip(y_true, K.epsilon(), None) + 1.)
     return K.mean(K.square(first_log - second_log), axis=-1)
 ```
+## XGBOOST Hyperparameter tunning
+### feature selection
+https://machinelearningmastery.com/feature-importance-and-feature-selection-with-xgboost-in-python/
