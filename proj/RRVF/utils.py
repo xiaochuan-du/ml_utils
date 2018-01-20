@@ -462,36 +462,6 @@ def add_rolling_stat(trn, period='60d'):
     trn = pd.merge(trn_org, trn, how='left', on=['air_store_id', 'visit_date'])
     return trn
 
-def add_store_hist_stat(tidy_df, trn):
-    "add_store_hist_stat"
-    # store historical vitors statistics
-    key = 'air_store_id'
-    agg = trn.groupby(key).agg([np.min, np.max, np.mean,
-                                        np.std]).rename(
-                                            columns={
-                                                'amin':
-                                                'min_{}'.format('visits'),
-                                                'amax':
-                                                'max_{}'.format('visits'),
-                                                'mean':
-                                                'mean_{}'.format('visits'),
-                                                'std':
-                                                'std_{}'.format('visits')
-                                            })
-    agg.reset_index(inplace=True)
-    agg.columns = agg.columns.droplevel()
-    agg = agg.reset_index()
-    agg.rename(
-        {
-            '': key,
-        }, axis='columns', inplace=True)
-    tidy_df = pd.merge(
-        tidy_df,
-        agg[['min_visits', 'max_visits', 'mean_visits', 'std_visits',
-                key]],
-        how='left')
-    return tidy_df
-
 
 def add_area_loc_stat(tidy_df, data):
     """
@@ -521,7 +491,7 @@ def add_area_loc_stat(tidy_df, data):
 
     # region by location
     for loc_vars in [['latitude', 'longitude'],
-                        ['hpb_latitude', 'hpb_longitude']]:
+                     ['hpb_latitude', 'hpb_longitude']]:
         if len(loc_vars[0].split('_')) > 1:
             src = loc_vars[0].split('_')[0]
         else:
@@ -546,8 +516,9 @@ def add_area_loc_stat(tidy_df, data):
     tidy_df = pd.merge(tidy_df, store_info, how='left', on='air_store_id')
     return tidy_df
 
+
 def add_holiday_stat(tidy_df, hol):
-# holiday related features
+    # holiday related features
     hol = hol.rename(
         {
             'calendar_date': 'Date',
@@ -566,6 +537,7 @@ def add_holiday_stat(tidy_df, hol):
         right_on='Date')
     return tidy_df
 
+
 def add_attr_static(tidy_df, attrs):
     "add_attr_static"
     # region/ area's statis
@@ -582,7 +554,29 @@ def add_attr_static(tidy_df, attrs):
         tidy_df = pd.merge(tidy_df, agg, how='left', on=key)
     return tidy_df
 
-def data2fea(trn, data_dir, run_para={}, dev_func=None, drop_vars=None):
+
+def add_default_2_tst(tes_like_trn, trn):
+    "add_default_2_tst"
+    hist_df = add_rolling_stat(trn, period='60d')
+
+    def func(a_store_df):
+        a_store_df = a_store_df.sort_values("visit_date")
+        return a_store_df.iloc[-1]
+    agg = hist_df.groupby('air_store_id').apply(func)
+    agg = agg.drop('air_store_id', errors='ignore',
+                   axis='columns').reset_index()
+    agg = agg[['air_store_id', 'rolling_60d_median']]
+    agg = agg.rename(
+        {
+            "rolling_60d_median": 'visitors',
+        }, axis="columns"
+    )
+    tes_like_trn = pd.merge(tes_like_trn, agg, how='left')
+    tes_like_trn.visitors = tes_like_trn.visitors.values + np.random.rand(tes_like_trn.visitors.values.shape[0])
+    return tes_like_trn
+
+
+def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
     " data cleansing and enrichment"
     af_etl = run_para.get("af_etl", None)
     use_cacheing = run_para.get("use_cacheing", None)
@@ -598,22 +592,22 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None, drop_vars=None):
             'id': pd.read_csv('{}/store_id_relation.csv'.format(data_dir)),
             'hol': pd.read_csv('{}/date_info.csv'.format(data_dir))
         }
-        # todo
-        tidy_df = add_rolling_stat(trn)
-        tidy_df = add_store_hist_stat(tidy_df, data['tra'])
+        if is_test:
+            # fill visits
+            src_df = add_default_2_tst(src_df, data['tra'])
+        print(src_df.head())
+        tidy_df = add_rolling_stat(src_df)
         tidy_df = add_area_loc_stat(tidy_df, data)
         tidy_df = add_holiday_stat(tidy_df, data["hol"])
-        static_attrs = ['air_loc', 'hpb_loc', 'area_name', 'hpb_area_name']
+        static_attrs = ['air_store_id', 'air_loc',
+                        'hpb_loc', 'area_name', 'hpb_area_name']
         tidy_df = add_attr_static(tidy_df, static_attrs)
-        
+
         # fill datetime splitted data
         get_info_from_date(tidy_df, ['visit_date'])
         # sort data according to their date
         tidy_df = tidy_df.sort_values('visit_date')
         mat = tidy_df.drop(['visit_date', 'Date'], axis=1)
-
-        if dev_func:
-            mat = dev_func(mat)
 
         cat_vars, contin_vars = inspect_var_type(mat)
         # fill NaN and drop useless columns
@@ -638,7 +632,7 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None, drop_vars=None):
         'nn_fea': split_cols(cat_map) + [contin_map],
         'sk_fea': np.concatenate([cat_map, contin_map], axis=1),
         'y': y,
-        'times': trn.visit_date,
+        'times': tidy_df.visit_date,
         'contin_cols': contin_cols,
         'cat_map_fit': cat_map_fit,
         'tidy_data': tidy_df,

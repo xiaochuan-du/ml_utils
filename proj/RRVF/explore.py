@@ -153,14 +153,31 @@ from importlib import reload
 reload(utils)
 
 data_dir = r'./data'
-trn = pd.read_csv('{}/air_visit_data.csv'.format(data_dir))
-feas = utils.data2fea(trn, data_dir)
+tes = pd.read_csv('{}/sample_submission.csv'.format(data_dir))
+tes_like_trn = utils.tes2trn(tes)
+# hist_df = utils.add_rolling_stat(trn, period='60d')
+# hist_df.head()
+feas = utils.data2fea(tes_like_trn, data_dir, is_test=True)
 print(feas.keys())
 tidy_data = feas['tidy_data']
 tidy_data.head()
 
 #%%
-tidy_data.mean_visits_in_area_name.unique()
+
+trn.visitors
+#  = tes_like_trn.visitors.v# tes_like_trn = tes_like_trn.assign(fill_from=
+#     pd.to_datetime(tes_like_trn.visit_date) - pd.Timedelta('365 days'))
+# tes_like_trn.fill_from = tes_like_trn.fill_from.astype('str')
+# tes_like_trn = pd.merge(tes_like_trn[['air_store_id', 'fill_from']], hist_df, how='left', 
+#     left_on=['air_store_id', 'fill_from'], right_on=['air_store_id', 'visit_date'])
+# DataFrameSummary(tes_like_trn).summary()
+
+#%%
+tes = pd.read_csv('{}/sample_submission.csv'.format(data_dir))
+tes_like_trn = utils.tes2trn(tes)
+
+tes_like_trn.head()
+tes_like_trn.visitors.values = tes_like_trn.visitors.v
 #%%
 start = 40
 step = 10
