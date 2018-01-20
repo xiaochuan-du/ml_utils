@@ -606,6 +606,7 @@ def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
         get_info_from_date(tidy_df, ['visit_date'])
         # sort data according to their date
         tidy_df = tidy_df.sort_values('visit_date')
+        tidy_df = tidy_df.assign(visit_date_ts=tidy_df.visit_date.astype('int') ) 
         mat = tidy_df.drop(['visit_date', 'Date'], axis=1)
     else:
         mat = pd.read_csv(use_cacheing)

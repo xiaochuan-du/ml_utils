@@ -157,7 +157,7 @@ trn = pd.read_csv('{}/air_visit_data.csv'.format(data_dir))
 feas = utils.data2fea(trn, 
                         data_dir, 
                         run_para= {
-                            "use_cacheing": 'result/caching.csv'
+                            "af_etl": 'result/caching.csv'
                         },
                         is_test= False)
 print(feas.keys())
@@ -166,7 +166,8 @@ tidy_data.head()
 
 #%%
 
-trn.visitors
+tidy_data.columns
+
 #  = tes_like_trn.visitors.v# tes_like_trn = tes_like_trn.assign(fill_from=
 #     pd.to_datetime(tes_like_trn.visit_date) - pd.Timedelta('365 days'))
 # tes_like_trn.fill_from = tes_like_trn.fill_from.astype('str')
@@ -175,11 +176,10 @@ trn.visitors
 # DataFrameSummary(tes_like_trn).summary()
 
 #%%
-tes = pd.read_csv('{}/sample_submission.csv'.format(data_dir))
-tes_like_trn = utils.tes2trn(tes)
-
-tes_like_trn.head()
-tes_like_trn.visitors.values = tes_like_trn.visitors.v
+trn = pd.read_csv('{}/air_visit_data.csv'.format(data_dir))
+trn.visit_date = pd.to_datetime(trn.visit_date)
+trn.visit_date = trn.visit_date.astype('int') / trn.visit_date.astype('int').max()
+trn.visit_date.head()
 #%%
 start = 40
 step = 10
