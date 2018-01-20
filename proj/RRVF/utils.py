@@ -354,7 +354,8 @@ def cat_map_info(feat):
 def get_emb(feat):
     name, c = cat_map_info(feat)
     c2 = (c + 1) // 2
-    if c2 > 50: c2 = 50
+    if c2 > 50:
+        c2 = 50
     inp = Input((1, ), dtype='int64', name=name + '_in')
     # , W_regularizer=l2(1e-6)
     u = Flatten(name=name + '_flt')(Embedding(
@@ -428,6 +429,159 @@ def split_cols(arr):
     return np.hsplit(arr, arr.shape[1])
 
 
+def add_rolling_stat(trn, period='60d'):
+    # todo fix test init values
+    " add_rolling_stat"
+    trn_org = trn.copy()
+    trn.visit_date = pd.to_datetime(trn.visit_date)
+
+    def func(a_store_df, period=period):
+        a_store_df = a_store_df.set_index('visit_date')
+        rolling_max = a_store_df["visitors"].rolling(period).max().shift(1)
+        rolling_min = a_store_df["visitors"].rolling(period).min().shift(1)
+        rolling_median = a_store_df["visitors"].rolling(
+            period).median().shift(1)
+        rolling_std = a_store_df["visitors"].rolling(period).std().shift(1)
+        a_store_df = a_store_df.reset_index()
+        for stat, var_name in zip([rolling_max, rolling_min, rolling_median, rolling_std],
+                                  ["rolling_{}_max".format(period), "rolling_{}_min".format(period),
+                                   "rolling_{}_median".format(period), "rolling_{}_std".format(period)]):
+            stat = pd.DataFrame(stat).reset_index()
+            stat = stat.rename(
+                {
+                    'visitors': var_name,
+                }, axis="columns"
+            )
+            a_store_df = pd.merge(
+                a_store_df, stat, on='visit_date', how='left')
+        return a_store_df
+    trn = trn.groupby('air_store_id').apply(func)
+    trn.index = trn.index.droplevel()
+    trn = trn.drop('visitors', axis='columns', errors='ignore')
+    trn.visit_date = trn.visit_date.astype('str')
+    trn = pd.merge(trn_org, trn, how='left', on=['air_store_id', 'visit_date'])
+    return trn
+
+def add_store_hist_stat(tidy_df, trn):
+    "add_store_hist_stat"
+    # store historical vitors statistics
+    key = 'air_store_id'
+    agg = trn.groupby(key).agg([np.min, np.max, np.mean,
+                                        np.std]).rename(
+                                            columns={
+                                                'amin':
+                                                'min_{}'.format('visits'),
+                                                'amax':
+                                                'max_{}'.format('visits'),
+                                                'mean':
+                                                'mean_{}'.format('visits'),
+                                                'std':
+                                                'std_{}'.format('visits')
+                                            })
+    agg.reset_index(inplace=True)
+    agg.columns = agg.columns.droplevel()
+    agg = agg.reset_index()
+    agg.rename(
+        {
+            '': key,
+        }, axis='columns', inplace=True)
+    tidy_df = pd.merge(
+        tidy_df,
+        agg[['min_visits', 'max_visits', 'mean_visits', 'std_visits',
+                key]],
+        how='left')
+    return tidy_df
+
+
+def add_area_loc_stat(tidy_df, data):
+    """
+        merge store info in two systems, and generate area /loc
+    """
+    # store information related features
+    data = get_reserve_tbl(data)
+    store_info = data["reserve"][[
+        'air_store_id', "src", 'genre_name', 'area_name', 'latitude',
+        'longitude'
+    ]]
+    store_info = store_info.drop_duplicates()
+    air_store_info = store_info[store_info.src == 'air']
+    hpg_store_info = store_info[(store_info.src == 'hpg') &
+                                (~store_info.genre_name.isna())]
+    hpg_store_info = hpg_store_info.rename(
+        {
+            'latitude': 'hpb_latitude',
+            'longitude': 'hpb_longitude',
+            'genre_name': 'hpb_genre_name',
+            'area_name': 'hpb_area_name',
+        },
+        axis='columns')
+    hpg_store_info = hpg_store_info.drop('src', axis=1, errors="ignore")
+    store_info = pd.merge(air_store_info, hpg_store_info, how='left')
+    store_info = store_info.drop('src', axis=1, errors="ignore")
+
+    # region by location
+    for loc_vars in [['latitude', 'longitude'],
+                        ['hpb_latitude', 'hpb_longitude']]:
+        if len(loc_vars[0].split('_')) > 1:
+            src = loc_vars[0].split('_')[0]
+        else:
+            src = 'air'
+        store_info[loc_vars] = store_info[loc_vars].astype('str')
+        store_info['{}_loc'.format(src)] = store_info[loc_vars].apply(
+            lambda x: '_'.join(x), axis=1)
+        store_info = store_info.drop(loc_vars, axis=1, errors='ignore')
+
+    # stores' number in region/ area
+    for grp_key in ['air_loc', 'hpb_loc', 'area_name', 'hpb_area_name']:
+        var_name = 'stores_in_{}'.format(grp_key)
+        agg = store_info.groupby(grp_key)['air_store_id'].count()
+        agg = pd.DataFrame(agg, columns=[agg.name])
+        agg = agg.reset_index()
+        agg = agg.rename(
+            {
+                'air_store_id': var_name,
+            }, axis="columns")
+        store_info = pd.merge(store_info, agg, on=grp_key, how='left')
+
+    tidy_df = pd.merge(tidy_df, store_info, how='left', on='air_store_id')
+    return tidy_df
+
+def add_holiday_stat(tidy_df, hol):
+# holiday related features
+    hol = hol.rename(
+        {
+            'calendar_date': 'Date',
+        }, axis='columns')
+    hol.Date = pd.to_datetime(hol.Date)
+    fld = 'holiday_flg'
+    hol = add_ts_elapsed(fld, ['af_', 'be_'], hol)
+    hol = add_ts_elapsed(fld, ['dur_'], hol)
+    str_date_hol = hol
+    str_date_hol.Date = str_date_hol.Date.astype('str')
+    tidy_df = pd.merge(
+        tidy_df,
+        str_date_hol,
+        how='left',
+        left_on='visit_date',
+        right_on='Date')
+    return tidy_df
+
+def add_attr_static(tidy_df, attrs):
+    "add_attr_static"
+    # region/ area's statis
+    for key in attrs:
+        agg = tidy_df.groupby(key)['visitors'].agg(
+            [np.min, np.max, np.mean, np.std]).rename(
+                columns={
+                    'amin': 'min_{}_in_{}'.format('visits', key),
+                    'amax': 'max_{}_in_{}'.format('visits', key),
+                    'mean': 'mean_{}_in_{}'.format('visits', key),
+                    'std': 'std_{}_in_{}'.format('visits', key)
+                })
+        agg.reset_index(inplace=True)
+        tidy_df = pd.merge(tidy_df, agg, how='left', on=key)
+    return tidy_df
+
 def data2fea(trn, data_dir, run_para={}, dev_func=None, drop_vars=None):
     " data cleansing and enrichment"
     af_etl = run_para.get("af_etl", None)
@@ -444,139 +598,14 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None, drop_vars=None):
             'id': pd.read_csv('{}/store_id_relation.csv'.format(data_dir)),
             'hol': pd.read_csv('{}/date_info.csv'.format(data_dir))
         }
-        # todo fix test init values
-        trn_org = trn.copy()
-        trn.visit_date = pd.to_datetime(trn.visit_date)
-        def func(a_store_df, period='60d'):
-            a_store_df = a_store_df.set_index('visit_date')
-            rolling_max = a_store_df["visitors"].rolling(period).max().shift(1)
-            rolling_min = a_store_df["visitors"].rolling(period).min().shift(1)
-            rolling_median = a_store_df["visitors"].rolling(period).median().shift(1)
-            rolling_std = a_store_df["visitors"].rolling(period).std().shift(1)
-            a_store_df = a_store_df.reset_index()
-            for stat, var_name in zip([rolling_max, rolling_min, rolling_median, rolling_std], 
-                        ["rolling_{}_max".format(period), "rolling_{}_min".format(period), 
-                         "rolling_{}_median".format(period), "rolling_{}_std".format(period)]):
-                stat = pd.DataFrame(stat).reset_index()
-                stat = stat.rename(
-                    {
-                        'visitors': var_name,
-                    }, axis="columns"
-                )
-                a_store_df = pd.merge(a_store_df, stat, on='visit_date', how='left')
-            return a_store_df
-        trn = trn.groupby('air_store_id').apply(func)
-        print(trn.head())
-        trn.index = trn.index.droplevel()
-        trn = trn.drop('visitors', axis='columns', errors='ignore')
-        trn.visit_date = trn.visit_date.astype('str')
-        trn = pd.merge(trn_org, trn, how='left', on=['air_store_id', 'visit_date'])
-        print(trn.head())
-        # store historical vitors statistics
-        key = 'air_store_id'
-        agg = data['tra'].groupby(key).agg([np.min, np.max, np.mean,
-                                            np.std]).rename(
-                                                columns={
-                                                    'amin':
-                                                    'min_{}'.format('visits'),
-                                                    'amax':
-                                                    'max_{}'.format('visits'),
-                                                    'mean':
-                                                    'mean_{}'.format('visits'),
-                                                    'std':
-                                                    'std_{}'.format('visits')
-                                                })
-        agg.reset_index(inplace=True)
-        agg.columns = agg.columns.droplevel()
-        agg = agg.reset_index()
-        agg.rename(
-            {
-                '': key,
-            }, axis='columns', inplace=True)
-        tidy_df = pd.merge(
-            trn,
-            agg[['min_visits', 'max_visits', 'mean_visits', 'std_visits',
-                 key]],
-            how='left')
-        # store information related features
-        data = get_reserve_tbl(data)
-        store_info = data["reserve"][[
-            'air_store_id', "src", 'genre_name', 'area_name', 'latitude',
-            'longitude'
-        ]]
-        store_info = store_info.drop_duplicates()
-        air_store_info = store_info[store_info.src == 'air']
-        hpg_store_info = store_info[(store_info.src == 'hpg') &
-                                    (~store_info.genre_name.isna())]
-        hpg_store_info = hpg_store_info.rename(
-            {
-                'latitude': 'hpb_latitude',
-                'longitude': 'hpb_longitude',
-                'genre_name': 'hpb_genre_name',
-                'area_name': 'hpb_area_name',
-            },
-            axis='columns')
-        hpg_store_info = hpg_store_info.drop('src', axis=1, errors="ignore")
-        store_info = pd.merge(air_store_info, hpg_store_info, how='left')
-        store_info = store_info.drop('src', axis=1, errors="ignore")
-
-        # region by location
-        for loc_vars in [['latitude', 'longitude'],
-                         ['hpb_latitude', 'hpb_longitude']]:
-            if len(loc_vars[0].split('_')) > 1:
-                src = loc_vars[0].split('_')[0]
-            else:
-                src = 'air'
-            store_info[loc_vars] = store_info[loc_vars].astype('str')
-            store_info['{}_loc'.format(src)] = store_info[loc_vars].apply(
-                lambda x: '_'.join(x), axis=1)
-            store_info = store_info.drop(loc_vars, axis=1, errors='ignore')
-
-        # stores' number in region/ area
-        for grp_key in ['air_loc', 'hpb_loc', 'area_name', 'hpb_area_name']:
-            var_name = 'stores_in_{}'.format(grp_key)
-            agg = store_info.groupby(grp_key)['air_store_id'].count()
-            agg = pd.DataFrame(agg, columns=[agg.name])
-            agg = agg.reset_index()
-            agg = agg.rename(
-                {
-                    'air_store_id': var_name,
-                }, axis="columns")
-            store_info = pd.merge(store_info, agg, on=grp_key, how='left')
-
-        tidy_df = pd.merge(tidy_df, store_info, how='left', on='air_store_id')
-
-        # holiday related features
-        hol = data["hol"]
-        hol = hol.rename(
-            {
-                'calendar_date': 'Date',
-            }, axis='columns')
-        hol.Date = pd.to_datetime(hol.Date)
-        fld = 'holiday_flg'
-        hol = add_ts_elapsed(fld, ['af_', 'be_'], hol)
-        hol = add_ts_elapsed(fld, ['dur_'], hol)
-        str_date_hol = hol
-        str_date_hol.Date = str_date_hol.Date.astype('str')
-        tidy_df = pd.merge(
-            tidy_df,
-            str_date_hol,
-            how='left',
-            left_on='visit_date',
-            right_on='Date')
-
-        # region/ area's statis
-        for key in ['air_loc', 'hpb_loc', 'area_name', 'hpb_area_name']:
-            agg = tidy_df.groupby(key)['visitors'].agg(
-                [np.min, np.max, np.mean, np.std]).rename(
-                    columns={
-                        'amin': 'min_{}_in_{}'.format('visits', key),
-                        'amax': 'max_{}_in_{}'.format('visits', key),
-                        'mean': 'mean_{}_in_{}'.format('visits', key),
-                        'std': 'std_{}_in_{}'.format('visits', key)
-                    })
-            agg.reset_index(inplace=True)
-            tidy_df = pd.merge(tidy_df, agg, how='left', on=key)
+        # todo
+        tidy_df = add_rolling_stat(trn)
+        tidy_df = add_store_hist_stat(tidy_df, data['tra'])
+        tidy_df = add_area_loc_stat(tidy_df, data)
+        tidy_df = add_holiday_stat(tidy_df, data["hol"])
+        static_attrs = ['air_loc', 'hpb_loc', 'area_name', 'hpb_area_name']
+        tidy_df = add_attr_static(tidy_df, static_attrs)
+        
         # fill datetime splitted data
         get_info_from_date(tidy_df, ['visit_date'])
         # sort data according to their date
@@ -585,7 +614,7 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None, drop_vars=None):
 
         if dev_func:
             mat = dev_func(mat)
-        
+
         cat_vars, contin_vars = inspect_var_type(mat)
         # fill NaN and drop useless columns
         mat[cat_vars] = mat[cat_vars].fillna('UD')
@@ -596,13 +625,14 @@ def data2fea(trn, data_dir, run_para={}, dev_func=None, drop_vars=None):
         mat.to_csv(af_etl)
     if drop_vars:
         mat = mat.drop(drop_vars, axis='columns', errors='ignore')
-        cat_vars = list(set(cat_vars)-set(drop_vars))
-        contin_vars = list(set(contin_vars)-set(drop_vars))
-    
+        cat_vars = list(set(cat_vars) - set(drop_vars))
+        contin_vars = list(set(contin_vars) - set(drop_vars))
+
     # reorder columns
     mat = mat.reindex(sorted(mat.columns), axis=1)
 
-    cat_map, contin_map, cat_cols, contin_cols, cat_map_fit, y = mat2fea(mat, cat_vars, contin_vars)
+    cat_map, contin_map, cat_cols, contin_cols, cat_map_fit, y = mat2fea(
+        mat, cat_vars, contin_vars)
 
     feas = {
         'nn_fea': split_cols(cat_map) + [contin_map],

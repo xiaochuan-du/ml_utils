@@ -135,7 +135,8 @@ pred = model.predict(feas['x_map'])
 
 #%%
 import os
-os.chdir(r'E:\workspace\ai\ml_utils\proj\RRVF')
+# os.chdir(r'E:\workspace\ai\ml_utils\proj\RRVF')
+os.chdir(r'/Users/kevindu/Documents/workspace/ml_utils/proj/RRVF')
 import glob
 import re
 import pickle
@@ -158,6 +159,8 @@ print(feas.keys())
 tidy_data = feas['tidy_data']
 tidy_data.head()
 
+#%%
+tidy_data.mean_visits_in_area_name.unique()
 #%%
 start = 40
 step = 10
