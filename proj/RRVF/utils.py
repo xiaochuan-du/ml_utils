@@ -595,7 +595,6 @@ def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
         if is_test:
             # fill visits
             src_df = add_default_2_tst(src_df, data['tra'])
-        print(src_df.head())
         tidy_df = add_rolling_stat(src_df)
         tidy_df = add_area_loc_stat(tidy_df, data)
         tidy_df = add_holiday_stat(tidy_df, data["hol"])
@@ -608,15 +607,15 @@ def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
         # sort data according to their date
         tidy_df = tidy_df.sort_values('visit_date')
         mat = tidy_df.drop(['visit_date', 'Date'], axis=1)
-
-        cat_vars, contin_vars = inspect_var_type(mat)
-        # fill NaN and drop useless columns
-        mat[cat_vars] = mat[cat_vars].fillna('UD')
-        mat[contin_vars] = mat[contin_vars].fillna(0)
     else:
-        mat.read_csv(use_cacheing)
+        mat = pd.read_csv(use_cacheing)
     if af_etl:
-        mat.to_csv(af_etl)
+        mat.to_csv(af_etl,index=False)
+    cat_vars, contin_vars = inspect_var_type(mat)
+    # fill NaN and drop useless columns
+    mat[cat_vars] = mat[cat_vars].fillna('UD')
+    mat[contin_vars] = mat[contin_vars].fillna(0)
+
     if drop_vars:
         mat = mat.drop(drop_vars, axis='columns', errors='ignore')
         cat_vars = list(set(cat_vars) - set(drop_vars))
@@ -632,10 +631,9 @@ def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
         'nn_fea': split_cols(cat_map) + [contin_map],
         'sk_fea': np.concatenate([cat_map, contin_map], axis=1),
         'y': y,
-        'times': tidy_df.visit_date,
         'contin_cols': contin_cols,
         'cat_map_fit': cat_map_fit,
-        'tidy_data': tidy_df,
+        'tidy_data': mat,
         'all_vars': cat_vars + contin_vars
     }
     return feas

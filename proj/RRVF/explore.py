@@ -153,11 +153,13 @@ from importlib import reload
 reload(utils)
 
 data_dir = r'./data'
-tes = pd.read_csv('{}/sample_submission.csv'.format(data_dir))
-tes_like_trn = utils.tes2trn(tes)
-# hist_df = utils.add_rolling_stat(trn, period='60d')
-# hist_df.head()
-feas = utils.data2fea(tes_like_trn, data_dir, is_test=True)
+trn = pd.read_csv('{}/air_visit_data.csv'.format(data_dir))
+feas = utils.data2fea(trn, 
+                        data_dir, 
+                        run_para= {
+                            "use_cacheing": 'result/caching.csv'
+                        },
+                        is_test= False)
 print(feas.keys())
 tidy_data = feas['tidy_data']
 tidy_data.head()
