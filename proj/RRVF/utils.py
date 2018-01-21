@@ -4,7 +4,7 @@ from sklearn_pandas import DataFrameMapper
 from sklearn.preprocessing import LabelEncoder, Imputer, StandardScaler
 import math
 from pandas_summary import DataFrameSummary
-
+import pickle as pkl
 from keras.layers import Concatenate, Dense, Dropout, Embedding, Flatten, Input, BatchNormalization
 from keras import initializers
 from keras.models import Model
@@ -572,7 +572,8 @@ def add_default_2_tst(tes_like_trn, trn):
         }, axis="columns"
     )
     tes_like_trn = pd.merge(tes_like_trn, agg, how='left')
-    tes_like_trn.visitors = tes_like_trn.visitors.values + np.random.rand(tes_like_trn.visitors.values.shape[0])
+    tes_like_trn.visitors = tes_like_trn.visitors.values + \
+        np.random.rand(tes_like_trn.visitors.values.shape[0])
     return tes_like_trn
 
 
@@ -590,15 +591,16 @@ def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
             'ar': pd.read_csv('{}/air_reserve.csv'.format(data_dir)),
             'hr': pd.read_csv('{}/hpg_reserve.csv'.format(data_dir)),
             'id': pd.read_csv('{}/store_id_relation.csv'.format(data_dir)),
-            'hol': pd.read_csv('{}/date_info.csv'.format(data_dir))
+            'hol': pd.read_csv('{}/date_info.csv'.format(data_dir)),
+            'ts_prep': pkl.load(open('{}/ts_prep.pkl'.format(data_dir), 'rb'))
         }
-
         if is_test:
             # fill visits
             src_df = add_default_2_tst(src_df, data['tra'])
         tidy_df = add_rolling_stat(src_df)
         tidy_df = add_area_loc_stat(tidy_df, data)
         tidy_df = add_holiday_stat(tidy_df, data["hol"])
+        tidy_df = add_prop(tidy_df, data['ts_prep'])
         static_attrs = ['air_store_id', 'air_loc',
                         'hpb_loc', 'area_name', 'hpb_area_name']
         tidy_df = add_attr_static(tidy_df, static_attrs)
@@ -607,12 +609,13 @@ def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
         get_info_from_date(tidy_df, ['visit_date'])
         # sort data according to their date
         tidy_df = tidy_df.sort_values('visit_date')
-        tidy_df = tidy_df.assign(visit_date_ts=tidy_df.visit_date.astype('int') ) 
+        tidy_df = tidy_df.assign(
+            visit_date_ts=tidy_df.visit_date.astype('int'))
         mat = tidy_df.drop(['visit_date', 'Date'], axis=1)
     else:
         mat = pd.read_csv(use_cacheing)
     if af_etl:
-        mat.to_csv(af_etl,index=False)
+        mat.to_csv(af_etl, index=False)
     cat_vars, contin_vars = inspect_var_type(mat)
     # fill NaN and drop useless columns
     mat[cat_vars] = mat[cat_vars].fillna('UD')
@@ -620,6 +623,8 @@ def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
 
     if drop_vars:
         mat = mat.drop(drop_vars, axis='columns', errors='ignore')
+        leave_date = list(set(drop_vars) - set(['Date']))
+        tidy_df = tidy_df.drop(leave_date, axis='columns', errors='ignore')
         cat_vars = list(set(cat_vars) - set(drop_vars))
         contin_vars = list(set(contin_vars) - set(drop_vars))
 
@@ -635,7 +640,25 @@ def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
         'y': y,
         'contin_cols': contin_cols,
         'cat_map_fit': cat_map_fit,
-        'tidy_data': mat,
+        'tidy_data': tidy_df,
         'all_vars': cat_vars + contin_vars
     }
     return feas
+
+
+def add_prop(trn, ts_feat):
+    ' add prophet features to train like dataframe'
+    for model_key in ts_feat.keys():
+        ts_feat[model_key] = ts_feat[model_key].assign(air_store_id=model_key)
+        ts_feat[model_key] = ts_feat[model_key].rename({
+            'ds': 'visit_date',
+        }, axis="columns")
+    concated = pd.concat([res for res in ts_feat.values()], axis=0)
+    concated.yhat = np.exp(concated.yhat.values)
+    concated.visit_date = concated.visit_date.astype('str')
+    name_dict = {col: 'prop_{}'.format(
+        col) for col in concated.columns if col != 'visit_date' and col != 'air_store_id'}
+    concated.rename(columns=dict(name_dict), inplace=True)
+    trn.visit_date = trn.visit_date.astype('str')
+    en_trn = pd.merge(trn, concated, on=['visit_date', 'air_store_id'])
+    return en_trn
