@@ -106,7 +106,7 @@ if __name__ == '__main__':
         file_obj.write(yaml_string)
     if usewgt:
         model.load_weights('./result/{}.h5'.format(model_file))
-    seed = np.random.rand() * (1) - 5
+    seed = np.random.rand() * (1) - 7
     model.optimizer.lr, epochs = np.power(10, seed), 500  # np.power(10, seed)
     tensorboard = TensorBoard(
         log_dir='./logs',
