@@ -634,7 +634,7 @@ def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
         'y': y,
         'contin_cols': contin_cols,
         'cat_map_fit': cat_map_fit,
-        'tidy_data': mat,
+        'tidy_data': tidy_df,
         'all_vars': cat_vars + contin_vars
     }
     return feas
