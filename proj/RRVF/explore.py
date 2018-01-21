@@ -135,7 +135,8 @@ pred = model.predict(feas['x_map'])
 
 #%%
 import os
-os.chdir(r'E:\workspace\ai\ml_utils\proj\RRVF')
+# os.chdir(r'E:\workspace\ai\ml_utils\proj\RRVF')
+os.chdir(r'/Users/kevindu/Documents/workspace/ml_utils/proj/RRVF')
 import glob
 import re
 import pickle
@@ -153,11 +154,34 @@ reload(utils)
 
 data_dir = r'./data'
 trn = pd.read_csv('{}/air_visit_data.csv'.format(data_dir))
-feas = utils.data2fea(trn, data_dir)
+feas = utils.data2fea(trn, 
+                        data_dir, 
+                        run_para= {
+                            "af_etl": 'result/caching.csv'
+                        },
+                        is_test= False)
 print(feas.keys())
 tidy_data = feas['tidy_data']
 tidy_data.head()
 
+#%%
+
+sp = np.fft.fft(trn.visitors)
+freq = np.fft.fftfreq(trn.visitors.shape[-1])
+plt.plot(freq, sp.real, freq, sp.imag)
+
+#  = tes_like_trn.visitors.v# tes_like_trn = tes_like_trn.assign(fill_from=
+#     pd.to_datetime(tes_like_trn.visit_date) - pd.Timedelta('365 days'))
+# tes_like_trn.fill_from = tes_like_trn.fill_from.astype('str')
+# tes_like_trn = pd.merge(tes_like_trn[['air_store_id', 'fill_from']], hist_df, how='left', 
+#     left_on=['air_store_id', 'fill_from'], right_on=['air_store_id', 'visit_date'])
+# DataFrameSummary(tes_like_trn).summary()
+
+#%%
+trn = pd.read_csv('{}/air_visit_data.csv'.format(data_dir))
+trn.visit_date = pd.to_datetime(trn.visit_date)
+trn.visit_date = trn.visit_date.astype('int') / trn.visit_date.astype('int').max()
+trn.visit_date.head()
 #%%
 start = 40
 step = 10
@@ -201,3 +225,28 @@ tidy_data.columns
 store_info.head()
 
 #%%
+# Python
+import pandas as pd
+import numpy as np
+from fbprophet import Prophet
+
+import os
+# os.chdir(r'E:\workspace\ai\ml_utils\proj\RRVF')
+os.chdir(r'/Users/kevindu/Documents/workspace/ml_utils/proj/RRVF')
+import glob
+import re
+import pickle
+
+import numpy as np
+import pandas as pd
+from isoweek import Week
+from pandas_summary import DataFrameSummary
+from keras.models import model_from_yaml
+import utils
+# import xgboost
+import random
+from importlib import reload
+reload(utils)
+
+data_dir = r'./data'
+trn = pd.read_csv('{}/air_visit_data.csv'.format(data_dir))
