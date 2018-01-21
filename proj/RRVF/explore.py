@@ -166,7 +166,9 @@ tidy_data.head()
 
 #%%
 
-tidy_data.columns
+sp = np.fft.fft(trn.visitors)
+freq = np.fft.fftfreq(trn.visitors.shape[-1])
+plt.plot(freq, sp.real, freq, sp.imag)
 
 #  = tes_like_trn.visitors.v# tes_like_trn = tes_like_trn.assign(fill_from=
 #     pd.to_datetime(tes_like_trn.visit_date) - pd.Timedelta('365 days'))
@@ -223,3 +225,28 @@ tidy_data.columns
 store_info.head()
 
 #%%
+# Python
+import pandas as pd
+import numpy as np
+from fbprophet import Prophet
+
+import os
+# os.chdir(r'E:\workspace\ai\ml_utils\proj\RRVF')
+os.chdir(r'/Users/kevindu/Documents/workspace/ml_utils/proj/RRVF')
+import glob
+import re
+import pickle
+
+import numpy as np
+import pandas as pd
+from isoweek import Week
+from pandas_summary import DataFrameSummary
+from keras.models import model_from_yaml
+import utils
+# import xgboost
+import random
+from importlib import reload
+reload(utils)
+
+data_dir = r'./data'
+trn = pd.read_csv('{}/air_visit_data.csv'.format(data_dir))
