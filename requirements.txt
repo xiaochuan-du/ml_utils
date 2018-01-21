@@ -7,3 +7,4 @@ isoweek
 keras
 tensorflow
 sklearn_pandas
+fbprophet==0.2.1

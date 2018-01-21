@@ -24,7 +24,7 @@ model_keys = list(model_zoo.keys())
 
 def func(model_key):
     model = model_zoo[model_key]
-    res = np.exp(model.predict(tst_time)['yhat'])
+    res = model.predict(tst_time)
     return res
 
 num_tasks = len(model_keys)
