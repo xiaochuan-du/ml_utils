@@ -16,11 +16,7 @@ import random
 
 concurrency = 3
 data_dir = r'./data'
-tst_time = pd.read_csv('time.csv').rename(
-    {
-        'visit_date': 'ds',
-    }, axis="columns"
-)
+tst_time = pd.DataFrame({'ds': pd.date_range('2016-01-01', '2017-04-22', freq='D')})
 step_task = 10
 model_zoo = pickle.load(open('result/prop.pkl', 'rb'))
 result = {}
@@ -42,4 +38,4 @@ with Pool(concurrency) as pool:
 
 import pickle as pkl
 print('dump result')
-pkl.dump(result, open('result/result1.pkl','wb'))
+pkl.dump(result, open('result/ts_prep.pkl','wb'))
