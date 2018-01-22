@@ -411,11 +411,11 @@ def get_bn_model(contin_cols, cat_map_fit):
     #contin_d = [d for inp,d in conts]
     x = Concatenate()([emb for inp, emb in embs] + [contin_out])
 
-    x = Dropout(0.02)(x)
-    x = BatchNormalization()(x)
-    x = Dense(1000, activation='relu', kernel_initializer='he_uniform')(x)
-    x = BatchNormalization()(x)
-    x = Dense(500, activation='relu', kernel_initializer='he_uniform')(x)
+    # x = Dropout(0.02)(x)
+    # x = BatchNormalization()(x)
+    # x = Dense(1000, activation='relu', kernel_initializer='he_uniform')(x)
+    # x = BatchNormalization()(x)
+    # x = Dense(500, activation='relu', kernel_initializer='he_uniform')(x)
     x = BatchNormalization()(x)
     x = Dropout(0.2)(x)
     x = Dense(1, activation='sigmoid')(x)
