@@ -806,7 +806,7 @@ def get_data(input_set, data_dir='./data',contin_map_fit=None, cat_map_fit=None)
                 'std_visits_in_hpb_area_name', 'visit_date_year']
     cat_vars = ['genre_name', 'air_store_id',
                 'hpb_genre_name', 'visit_date_year',
-                'area_name']  # "air_store_id"
+                'area_name', 'air_loc',]
     contin_vars = ['stores_in_hpb_loc',
                    'stores_in_hpb_area_name',
                    'stores_in_area_name',
@@ -814,10 +814,12 @@ def get_data(input_set, data_dir='./data',contin_map_fit=None, cat_map_fit=None)
     precup_vars = ["prop_yhat",
                    "prop_yhat_lower",
                    "prop_yhat_upper",
+                   "max_visits_in_air_store_id",
+                   "min_visits_in_air_store_id",
+                   "std_visits_in_air_store_id",
                    ]
 
     keep_vars = cat_vars + contin_vars + precup_vars + ['visitors']
-
     drop_vars = list(set(ALL_VARS) - set(keep_vars))
     feas = data2fea_v2(input_set, data_dir, drop_vars=drop_vars)
     tidy_data = feas['tidy_data']
