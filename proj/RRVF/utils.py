@@ -708,37 +708,27 @@ def data2fea_v2(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
         if is_test:
             # fill visits
             src_df = add_default_2_tst(src_df, data['tra'])
-        tidy_df = add_rolling_stat(src_df)
+        tidy_df = add_prop(src_df, data['ts_prep'])
+        # tidy_df = add_rolling_stat(tidy_df)
         tidy_df = add_area_loc_stat(tidy_df, data)
-        tidy_df = add_holiday_stat(tidy_df, data["hol"])
-        tidy_df = add_prop(tidy_df, data['ts_prep'])
+        # tidy_df = add_holiday_stat(tidy_df, data["hol"])
+        
         static_attrs = ['air_store_id', 'air_loc',
                         'hpb_loc', 'area_name', 'hpb_area_name']
         tidy_df = add_attr_static(tidy_df, static_attrs)
         # fill datetime splitted data
         get_info_from_date(tidy_df, ['visit_date'])
         # sort data according to their date
-        tidy_df = tidy_df.sort_values('visit_date')
-        tidy_df = tidy_df.assign(
-            visit_date_ts=tidy_df.visit_date.astype('int'))
-        tidy_df = tidy_df.sort_values(['air_store_id', 'Date'])
-        mat = tidy_df
-        # mat = tidy_df.drop(['visit_date', 'Date'], axis=1)
     else:
         mat = pd.read_csv(use_cacheing)
     if af_etl:
         mat.to_csv(af_etl, index=False)
-    cat_vars, contin_vars = inspect_var_type(mat)
-    # fill NaN and drop useless columns
-    mat[cat_vars] = mat[cat_vars].fillna('UD')
-    mat[contin_vars] = mat[contin_vars].fillna(0)
 
     if drop_vars:
-        mat = mat.drop(drop_vars, axis='columns', errors='ignore')
         leave_date = list(set(drop_vars) - set(['Date']))
         tidy_df = tidy_df.drop(leave_date, axis='columns', errors='ignore')
     # reorder columns
-    mat = mat.reindex(sorted(mat.columns), axis=1)
+    tidy_df = tidy_df.reindex(sorted(tidy_df.columns), axis=1)
     feas = {
         'tidy_data': tidy_df,
     }
@@ -838,7 +828,18 @@ def get_data(input_set, data_dir='./data',contin_map_fit=None, cat_map_fit=None)
     max_log_y = np.max(np.log1p(Y))
     Y_org = Y
     Y = uniform(Y_org)
-    return X, Y, Y_org, max_log_y, tidy_data['prop_yhat'], contin_map_fit, cat_map_fit
+    all_vars = cat_vars + contin_vars + precup_vars
+    retuan_val = {
+        'X': X,
+        'Y': Y,
+        'Y_org': Y_org,
+        'max_log_y': max_log_y,
+        'gadge': tidy_data['prop_yhat'],
+        'contin_map_fit': contin_map_fit,
+        'cat_map_fit': cat_map_fit,
+        'all_vars': all_vars
+    }
+    return retuan_val
 
 
 def add_prop(trn, ts_feat):
