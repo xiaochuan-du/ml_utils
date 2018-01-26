@@ -32,6 +32,11 @@ wheels/
 *.manifest
 *.spec
 
+proj/RRVF_yy/data/
+proj/RRVF_yy/result/
+proj/RRVF_yy/.vscode/
+proj/RRVF_yy/*.pkl
+
 proj/RRVF/data
 proj/RRVF/result
 proj/RRVF/logs/
