@@ -105,21 +105,19 @@ params = {
 evals_result = {} 
 gbm = lgb.train(params,
                 lgb_train,
-                num_boost_round=300,
+                num_boost_round=3000,
                 valid_sets=(lgb_train, lgb_eval),
                 feval=rmsle_wo_log,
                 evals_result=evals_result,
                 ) # early_stopping_rounds=0
 
+gbm.save_model('./result/gbm_model.txt')
 y_train_orig = train_set.visitors.values
 
 base_valid= rmsle(g_y_trn.values, y_train_orig.ravel())
 base_trn= rmsle(g_y_valid.values, y_valid_orig.ravel())
 
 print('Base line train loss {}, valid loss {}'.format(base_trn, base_valid))
-
-# split_point = X.shape[0] - y_valid_orig.ravel().shape[0]
-# base_line = rmsle(tidy_data['prop_yhat'].values[split_point:].ravel(), y_valid_orig.ravel())
 
 pred_valid = gbm.predict(X_valid)
 pred_valid_orig = utils.log_max_inv(pred_valid, max_log_y)
