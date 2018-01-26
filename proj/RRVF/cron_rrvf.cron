@@ -1,0 +1,1 @@
+45 04 * * * docker run -it -v /home/ec2-user/ai/ml_utils/proj/RRVF:/src -w /src dy:dev python3 predict_prop_mul.py

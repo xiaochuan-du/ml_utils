@@ -4,7 +4,7 @@ from sklearn_pandas import DataFrameMapper
 from sklearn.preprocessing import LabelEncoder, Imputer, StandardScaler
 import math
 from pandas_summary import DataFrameSummary
-
+import pickle as pkl
 from keras.layers import Concatenate, Dense, Dropout, Embedding, Flatten, Input, BatchNormalization
 from keras import initializers
 from keras.models import Model
@@ -411,11 +411,11 @@ def get_bn_model(contin_cols, cat_map_fit):
     #contin_d = [d for inp,d in conts]
     x = Concatenate()([emb for inp, emb in embs] + [contin_out])
 
-    x = Dropout(0.02)(x)
-    x = BatchNormalization()(x)
-    x = Dense(1000, activation='relu', kernel_initializer='he_uniform')(x)
-    x = BatchNormalization()(x)
-    x = Dense(500, activation='relu', kernel_initializer='he_uniform')(x)
+    # x = Dropout(0.02)(x)
+    # x = BatchNormalization()(x)
+    # x = Dense(1000, activation='relu', kernel_initializer='he_uniform')(x)
+    # x = BatchNormalization()(x)
+    # x = Dense(500, activation='relu', kernel_initializer='he_uniform')(x)
     x = BatchNormalization()(x)
     x = Dropout(0.2)(x)
     x = Dense(1, activation='sigmoid')(x)
@@ -572,7 +572,8 @@ def add_default_2_tst(tes_like_trn, trn):
         }, axis="columns"
     )
     tes_like_trn = pd.merge(tes_like_trn, agg, how='left')
-    tes_like_trn.visitors = tes_like_trn.visitors.values + np.random.rand(tes_like_trn.visitors.values.shape[0])
+    tes_like_trn.visitors = tes_like_trn.visitors.values + \
+        np.random.rand(tes_like_trn.visitors.values.shape[0])
     return tes_like_trn
 
 
@@ -590,7 +591,8 @@ def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
             'ar': pd.read_csv('{}/air_reserve.csv'.format(data_dir)),
             'hr': pd.read_csv('{}/hpg_reserve.csv'.format(data_dir)),
             'id': pd.read_csv('{}/store_id_relation.csv'.format(data_dir)),
-            'hol': pd.read_csv('{}/date_info.csv'.format(data_dir))
+            'hol': pd.read_csv('{}/date_info.csv'.format(data_dir)),
+            'ts_prep': pkl.load(open('{}/ts_prep.pkl'.format(data_dir), 'rb'))
         }
         if is_test:
             # fill visits
@@ -598,6 +600,7 @@ def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
         tidy_df = add_rolling_stat(src_df)
         tidy_df = add_area_loc_stat(tidy_df, data)
         tidy_df = add_holiday_stat(tidy_df, data["hol"])
+        tidy_df = add_prop(tidy_df, data['ts_prep'])
         static_attrs = ['air_store_id', 'air_loc',
                         'hpb_loc', 'area_name', 'hpb_area_name']
         tidy_df = add_attr_static(tidy_df, static_attrs)
@@ -606,12 +609,13 @@ def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
         get_info_from_date(tidy_df, ['visit_date'])
         # sort data according to their date
         tidy_df = tidy_df.sort_values('visit_date')
-        tidy_df = tidy_df.assign(visit_date_ts=tidy_df.visit_date.astype('int') ) 
+        tidy_df = tidy_df.assign(
+            visit_date_ts=tidy_df.visit_date.astype('int'))
         mat = tidy_df.drop(['visit_date', 'Date'], axis=1)
     else:
         mat = pd.read_csv(use_cacheing)
     if af_etl:
-        mat.to_csv(af_etl,index=False)
+        mat.to_csv(af_etl, index=False)
     cat_vars, contin_vars = inspect_var_type(mat)
     # fill NaN and drop useless columns
     mat[cat_vars] = mat[cat_vars].fillna('UD')
@@ -619,12 +623,13 @@ def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
 
     if drop_vars:
         mat = mat.drop(drop_vars, axis='columns', errors='ignore')
+        leave_date = list(set(drop_vars) - set(['Date']))
+        tidy_df = tidy_df.drop(leave_date, axis='columns', errors='ignore')
         cat_vars = list(set(cat_vars) - set(drop_vars))
         contin_vars = list(set(contin_vars) - set(drop_vars))
 
     # reorder columns
     mat = mat.reindex(sorted(mat.columns), axis=1)
-
     cat_map, contin_map, cat_cols, contin_cols, cat_map_fit, y = mat2fea(
         mat, cat_vars, contin_vars)
 
@@ -635,6 +640,223 @@ def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
         'contin_cols': contin_cols,
         'cat_map_fit': cat_map_fit,
         'tidy_data': tidy_df,
-        'all_vars': cat_vars + contin_vars
+        'all_vars': cat_vars + contin_vars,
+        'cat_vars': cat_vars
     }
     return feas
+
+
+def uniform(y_orig):
+    ' y uniform'
+    max_log_y = np.max(np.log1p(y_orig))
+    return np.log1p(y_orig) / max_log_y
+
+
+def mat2fea_v2(mat, cat_vars, contin_vars, precup_vars, contin_map_fit=None, cat_map_fit=None):
+    " from feature dataframe to matrix based on type"
+    mat[contin_vars] = mat[contin_vars].astype('float')
+    for v in contin_vars:
+        mat.loc[mat[v].isnull(), v] = 0
+    for v in precup_vars:
+        mat.loc[mat[v].isnull(), v] = 0
+    for v in cat_vars:
+        mat.loc[mat[v].isnull(), v] = ""
+
+    if cat_vars:
+        if not contin_map_fit:
+            cat_maps = [(o, LabelEncoder()) for o in cat_vars]
+            cat_mapper = DataFrameMapper(cat_maps)
+            cat_map_fit = cat_mapper.fit(mat)
+        cat_map = cat_map_fit.transform(mat).astype(np.int64)
+
+    if contin_vars:
+        if not contin_map_fit:
+            contin_maps = [([o], StandardScaler()) for o in contin_vars]
+            contin_mapper = DataFrameMapper(contin_maps)
+            contin_map_fit = contin_mapper.fit(mat)
+        contin_map = contin_map_fit.transform(mat).astype(np.float)
+
+    if precup_vars:
+        precup_map = mat[precup_vars].apply(uniform).fillna(0).values
+    return_vars = []
+    if cat_vars:
+        return_vars.append(cat_map)
+    if contin_vars:
+        return_vars.append(contin_map)
+    if precup_vars:
+        return_vars.append(precup_map)
+    return np.concatenate(return_vars, axis=1), mat.visitors.values, contin_map_fit, cat_map_fit
+
+
+def data2fea_v2(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
+    " data cleansing and enrichment"
+    af_etl = run_para.get("af_etl", None)
+    use_cacheing = run_para.get("use_cacheing", None)
+    if not use_cacheing:
+        # load data from disk into memory
+        data = {
+            'tra': pd.read_csv('{}/air_visit_data.csv'.format(data_dir)),
+            # 'tes': pd.read_csv('{}/sample_submission.csv'.format(data_dir)),
+            'as': pd.read_csv('{}/air_store_info.csv'.format(data_dir)),
+            'hs': pd.read_csv('{}/hpg_store_info.csv'.format(data_dir)),
+            'ar': pd.read_csv('{}/air_reserve.csv'.format(data_dir)),
+            'hr': pd.read_csv('{}/hpg_reserve.csv'.format(data_dir)),
+            'id': pd.read_csv('{}/store_id_relation.csv'.format(data_dir)),
+            'hol': pd.read_csv('{}/date_info.csv'.format(data_dir)),
+            'ts_prep': pkl.load(open('{}/ts_prep.pkl'.format(data_dir), 'rb'))
+        }
+        if is_test:
+            # fill visits
+            src_df = add_default_2_tst(src_df, data['tra'])
+        tidy_df = add_prop(src_df, data['ts_prep'])
+        # tidy_df = add_rolling_stat(tidy_df)
+        tidy_df = add_area_loc_stat(tidy_df, data)
+        # tidy_df = add_holiday_stat(tidy_df, data["hol"])
+        
+        static_attrs = ['air_store_id', 'air_loc',
+                        'hpb_loc', 'area_name', 'hpb_area_name']
+        tidy_df = add_attr_static(tidy_df, static_attrs)
+        # fill datetime splitted data
+        get_info_from_date(tidy_df, ['visit_date'])
+        # sort data according to their date
+    else:
+        mat = pd.read_csv(use_cacheing)
+    if af_etl:
+        mat.to_csv(af_etl, index=False)
+
+    if drop_vars:
+        leave_date = list(set(drop_vars) - set(['Date']))
+        tidy_df = tidy_df.drop(leave_date, axis='columns', errors='ignore')
+    # reorder columns
+    tidy_df = tidy_df.reindex(sorted(tidy_df.columns), axis=1)
+    feas = {
+        'tidy_data': tidy_df,
+    }
+    return feas
+
+
+def get_data(input_set, data_dir='./data',contin_map_fit=None, cat_map_fit=None):
+    ALL_VARS = ['visit_date_month',
+                'hpb_loc',
+                'hpb_genre_name',
+                'air_loc',
+                'genre_name',
+                'visit_date_week',
+                'area_name',
+                'air_store_id',
+                'visit_date_dayofweek',
+                'prop_yhat_lower',
+                'prop_seasonal_upper',
+                'max_visits_in_air_store_id',
+                'af_holiday_flg',
+                'prop_3_lower',
+                'prop_3_upper',
+                'prop_holidays_lower',
+                'prop_seasonal_lower',
+                'prop_weekly_upper',
+                'prop_1',
+                'prop_holidays_upper',
+                'prop_2_lower',
+                'min_visits_in_air_store_id',
+                'prop_2_upper',
+                'stores_in_area_name',
+                'prop_trend_lower',
+                'prop_3',
+                'max_visits_in_area_name',
+                'prop_6',
+                'rolling_60d_median',
+                'prop_yhat_upper',
+                'prop_1_upper',
+                'std_visits_in_air_store_id',
+                'prop_6_lower',
+                'prop_seasonalities_upper',
+                'rolling_60d_std',
+                'mean_visits_in_air_loc',
+                'be_holiday_flg',
+                'std_visits_in_air_loc',
+                'prop_6_upper',
+                'visit_date_ts',
+                'prop_weekly_lower',
+                'prop_trend',
+                'prop_yhat',
+                'rolling_60d_min',
+                'prop_weekly',
+                'prop_2',
+                'prop_seasonal',
+                'prop_seasonalities_lower',
+                'prop_seasonalities',
+                'rolling_60d_max',
+                'prop_1_lower',
+                'prop_trend_upper',
+                'prop_holidays',
+                'mean_visits_in_air_store_id',
+                'visit_date',
+                'visitors',
+                'hpb_area_name', 'stores_in_air_loc',
+                'stores_in_hpb_loc', 'stores_in_hpb_area_name', 'Date', 'holiday_flg',
+                'dur_time_holiday_flg', 'dur_holiday_flg', 'dur_prog_holiday_flg',
+                'prop_yhat',
+                'min_visits_in_air_loc', 'max_visits_in_air_loc',
+                'min_visits_in_hpb_loc', 'max_visits_in_hpb_loc',
+                'mean_visits_in_hpb_loc', 'std_visits_in_hpb_loc',
+                'min_visits_in_area_name',
+                'mean_visits_in_area_name',
+                'std_visits_in_area_name', 'min_visits_in_hpb_area_name',
+                'max_visits_in_hpb_area_name', 'mean_visits_in_hpb_area_name',
+                'std_visits_in_hpb_area_name', 'visit_date_year']
+    cat_vars = ['genre_name', 'air_store_id',
+                'hpb_genre_name', 'visit_date_year',
+                'area_name', 'air_loc',]
+    contin_vars = ['stores_in_hpb_loc',
+                   'stores_in_hpb_area_name',
+                   'stores_in_area_name',
+                   'stores_in_air_loc']
+    precup_vars = ["prop_yhat",
+                   "prop_yhat_lower",
+                   "prop_yhat_upper",
+                   "max_visits_in_air_store_id",
+                   "min_visits_in_air_store_id",
+                   "std_visits_in_air_store_id",
+                   ]
+
+    keep_vars = cat_vars + contin_vars + precup_vars + ['visitors']
+    drop_vars = list(set(ALL_VARS) - set(keep_vars))
+    feas = data2fea_v2(input_set, data_dir, drop_vars=drop_vars)
+    tidy_data = feas['tidy_data']
+    data_set = tidy_data[keep_vars]
+    X, Y, contin_map_fit, cat_map_fit = mat2fea_v2(
+        data_set, cat_vars, contin_vars, precup_vars, contin_map_fit, cat_map_fit)
+    Y = Y[:].reshape(-1, 1)
+    max_log_y = np.max(np.log1p(Y))
+    Y_org = Y
+    Y = uniform(Y_org)
+    all_vars = cat_vars + contin_vars + precup_vars
+    retuan_val = {
+        'X': X,
+        'Y': Y,
+        'Y_org': Y_org,
+        'max_log_y': max_log_y,
+        'gadge': tidy_data['prop_yhat'],
+        'contin_map_fit': contin_map_fit,
+        'cat_map_fit': cat_map_fit,
+        'all_vars': all_vars
+    }
+    return retuan_val
+
+
+def add_prop(trn, ts_feat):
+    ' add prophet features to train like dataframe'
+    for model_key in ts_feat.keys():
+        ts_feat[model_key] = ts_feat[model_key].assign(air_store_id=model_key)
+        ts_feat[model_key] = ts_feat[model_key].rename({
+            'ds': 'visit_date',
+        }, axis="columns")
+    concated = pd.concat([res for res in ts_feat.values()], axis=0)
+    concated.yhat = np.exp(concated.yhat.values)
+    concated.visit_date = concated.visit_date.astype('str')
+    name_dict = {col: 'prop_{}'.format(
+        col) for col in concated.columns if col != 'visit_date' and col != 'air_store_id'}
+    concated.rename(columns=dict(name_dict), inplace=True)
+    trn.visit_date = trn.visit_date.astype('str')
+    en_trn = pd.merge(trn, concated, on=['visit_date', 'air_store_id'], how='left')
+    return en_trn
