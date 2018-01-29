@@ -1,8 +1,14 @@
+*~
+.pypirc
+~*
+tmp*
+tags
+data
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-*/logs/*
 
 # C extensions
 *.so
@@ -31,15 +37,6 @@ wheels/
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
-
-proj/RRVF_yy/data/
-proj/RRVF_yy/result/
-proj/RRVF_yy/.vscode/
-proj/RRVF_yy/*.pkl
-
-proj/RRVF/data
-proj/RRVF/result
-proj/RRVF/logs/
 
 # Installer logs
 pip-log.txt
@@ -110,6 +107,13 @@ ENV/
 # mypy
 .mypy_cache/
 
-# 
-proj/RRVF/images/*
-*.pkl
+.vscode
+*.swp
+
+# osx generated files
+.DS_Store
+.DS_Store?
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea
