@@ -23,7 +23,7 @@ def add_prop(trn, ts_feat):
     concated.rename(columns=dict(name_dict), inplace=True)
     trn.visit_date = trn.visit_date.astype('str')
     en_trn = pd.merge(trn, concated[['prop_yhat_lower', 'prop_yhat_upper', 'prop_yhat', 'visit_date', 'air_store_id']], on=['visit_date', 'air_store_id'], how='left')
-    return en_trn
+    return en_trn, [], ['prop_yhat_lower', 'prop_yhat_upper', 'prop_yhat']
 
 def trn2test(tes_in_trn):
     tes_in_trn['id'] = tes_in_trn[['air_store_id', 'visit_date']].apply(
@@ -49,7 +49,9 @@ def add_holiday_stat(tidy_df, hol):
         how='left',
         left_on='visit_date',
         right_on='Date')
-    return tidy_df
+    return tidy_df, ['holiday_flg', 'af_holiday_flg',
+       'be_holiday_flg', 'dur_time_holiday_flg', 'dur_holiday_flg',
+       'dur_prog_holiday_flg',], []
 
 class TimeToEvent(object):
     'iter across row'
@@ -270,7 +272,9 @@ def add_area_loc_stat(tidy_df, data):
         store_info = pd.merge(store_info, agg, on=grp_key, how='left')
 
     tidy_df = pd.merge(tidy_df, store_info, how='left', on='air_store_id')
-    return tidy_df
+    return tidy_df, [ 'genre_name', 'area_name', 'hpb_genre_name',
+       'hpb_area_name', 'air_loc', 'hpb_loc'], ['stores_in_air_loc',
+       'stores_in_hpb_loc', 'stores_in_area_name', 'stores_in_hpb_area_name',]
 
 def add_attr_static(tidy_df, attrs):
     "add_attr_static"
