@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 
+
 def tes2trn(tes):
     tes = tes.assign(
         air_store_id=tes["id"].map(lambda x: '_'.join(x.split('_')[:-1])))
@@ -22,8 +23,22 @@ def add_prop(trn, ts_feat):
         col) for col in concated.columns if col != 'visit_date' and col != 'air_store_id'}
     concated.rename(columns=dict(name_dict), inplace=True)
     trn.visit_date = trn.visit_date.astype('str')
-    en_trn = pd.merge(trn, concated[['prop_yhat_lower', 'prop_yhat_upper', 'prop_yhat', 'visit_date', 'air_store_id']], on=['visit_date', 'air_store_id'], how='left')
+    en_trn = pd.merge(trn, concated[['prop_yhat_lower', 'prop_yhat_upper', 'prop_yhat',
+                                     'visit_date', 'air_store_id']], on=['visit_date', 'air_store_id'], how='left')
     return en_trn, [], ['prop_yhat_lower', 'prop_yhat_upper', 'prop_yhat']
+
+
+def add_wea(trn, wea):
+    ' add prophet features to train like dataframe'
+
+    wea = wea[['visit_date', 'air_store_id',  'avg_temperature', 'avg_sea_pressure', 'cloud_cover',
+               'hours_sunlight', 'precipitation', 'solar_radiation', 'total_snowfall', 'avg_wind_speed', 'avg_humidity', ]]
+    wea_df = wea.sort_values(['air_store_id', 'visit_date']).fillna(
+        method='bfill', axis=1)
+    en_trn = pd.merge(trn, wea_df, how='left', on=[
+                      'visit_date', 'air_store_id'])
+    return en_trn, [], ['avg_temperature', 'avg_sea_pressure', 'cloud_cover', 'hours_sunlight', 'precipitation', 'solar_radiation', 'total_snowfall', 'avg_wind_speed', 'avg_humidity']
+
 
 def trn2test(tes_in_trn):
     tes_in_trn['id'] = tes_in_trn[['air_store_id', 'visit_date']].apply(
@@ -50,8 +65,9 @@ def add_holiday_stat(tidy_df, hol):
         left_on='visit_date',
         right_on='Date')
     return tidy_df, ['holiday_flg', 'af_holiday_flg',
-       'be_holiday_flg', 'dur_time_holiday_flg', 'dur_holiday_flg',
-       'dur_prog_holiday_flg',], []
+                     'be_holiday_flg', 'dur_time_holiday_flg', 'dur_holiday_flg',
+                     'dur_prog_holiday_flg', ], []
+
 
 class TimeToEvent(object):
     'iter across row'
@@ -140,6 +156,7 @@ def add_ts_elapsed(fld, prefixs, df):
         df[prog_fld].fillna(0, inplace=True)
         return df
 
+
 def get_reserve_tbl(data):
     " get_reserve_tbl "
     hpg_reserve = data['hr']
@@ -221,6 +238,7 @@ def get_reserve_tbl(data):
     data['reserve'] = reserve_en
     return data
 
+
 def add_area_loc_stat(tidy_df, data):
     """
         merge store info in two systems, and generate area /loc
@@ -272,9 +290,10 @@ def add_area_loc_stat(tidy_df, data):
         store_info = pd.merge(store_info, agg, on=grp_key, how='left')
 
     tidy_df = pd.merge(tidy_df, store_info, how='left', on='air_store_id')
-    return tidy_df, [ 'genre_name', 'area_name', 'hpb_genre_name',
-       'hpb_area_name', 'air_loc', 'hpb_loc'], ['stores_in_air_loc',
-       'stores_in_hpb_loc', 'stores_in_area_name', 'stores_in_hpb_area_name',]
+    return tidy_df, ['genre_name', 'area_name', 'hpb_genre_name',
+                     'hpb_area_name', 'air_loc', 'hpb_loc'], ['stores_in_air_loc',
+                                                              'stores_in_hpb_loc', 'stores_in_area_name', 'stores_in_hpb_area_name', ]
+
 
 def add_attr_static(tidy_df, attrs):
     "add_attr_static"
