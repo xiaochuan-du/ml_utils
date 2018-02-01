@@ -139,8 +139,8 @@ def get_classes(path):
     (val_classes, trn_classes, val_labels, trn_labels,
     val_filenames, filenames, test_filenames) = get_classes(path)
     """
-    trn_batches = get_batches(path + 'train', shuffle=False, batch_size=1)
-    val_batches = get_batches(path + 'valid', shuffle=False, batch_size=1)
+    trn_batches = get_batches(path + 'raw/trn', shuffle=False, batch_size=1)
+    val_batches = get_batches(path + 'raw/valid', shuffle=False, batch_size=1)
     test_batches = get_batches(path + 'test', shuffle=False, batch_size=1)
     return (val_batches.classes, trn_batches.classes,
             onehot(val_batches.classes), onehot(trn_batches.classes),
