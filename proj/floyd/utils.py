@@ -31,13 +31,14 @@ def add_prop(trn, ts_feat):
 def add_wea(trn, wea):
     ' add prophet features to train like dataframe'
 
-    wea = wea[['visit_date', 'air_store_id',  'avg_temperature', 'avg_sea_pressure', 'cloud_cover',
-               'hours_sunlight', 'precipitation', 'solar_radiation', 'total_snowfall', 'avg_wind_speed', 'avg_humidity', ]]
+    wea = wea[['visit_date', 'air_store_id', 'avg_temperature',
+               'hours_sunlight','solar_radiation', 'total_snowfall', 'avg_humidity', ]]
     wea_df = wea.sort_values(['air_store_id', 'visit_date']).fillna(
         method='bfill', axis=1)
     en_trn = pd.merge(trn, wea_df, how='left', on=[
                       'visit_date', 'air_store_id'])
-    return en_trn, [], ['avg_temperature', 'avg_sea_pressure', 'cloud_cover', 'hours_sunlight', 'precipitation', 'solar_radiation', 'total_snowfall', 'avg_wind_speed', 'avg_humidity']
+    return en_trn, [], ['avg_temperature',
+               'hours_sunlight','solar_radiation', 'total_snowfall', 'avg_humidity']
 
 
 def trn2test(tes_in_trn):
@@ -244,30 +245,37 @@ def add_area_loc_stat(tidy_df, data):
         merge store info in two systems, and generate area /loc
     """
     # store information related features
-    data = get_reserve_tbl(data)
-    store_info = data["reserve"][[
-        'air_store_id', "src", 'genre_name', 'area_name', 'latitude',
-        'longitude'
-    ]]
-    store_info = store_info.drop_duplicates()
-    air_store_info = store_info[store_info.src == 'air']
-    hpg_store_info = store_info[(store_info.src == 'hpg') &
-                                (~store_info.genre_name.isna())]
-    hpg_store_info = hpg_store_info.rename(
-        {
-            'latitude': 'hpb_latitude',
-            'longitude': 'hpb_longitude',
-            'genre_name': 'hpb_genre_name',
-            'area_name': 'hpb_area_name',
-        },
-        axis='columns')
-    hpg_store_info = hpg_store_info.drop('src', axis=1, errors="ignore")
-    store_info = pd.merge(air_store_info, hpg_store_info, how='left')
-    store_info = store_info.drop('src', axis=1, errors="ignore")
+    hpg_store_info = data['hs']
+    store_id_relation = data['id']
+    air_store_info = data['as']
 
+    hpg_joined = hpg_store_info
+    hpg_joined.rename(
+    {
+        'latitude': 'hpg_latitude',
+        'longitude': 'hpg_longitude',
+    },
+    axis='columns',
+    inplace=True)
+
+    hpg_fl_joined = pd.merge(
+        store_id_relation,
+        hpg_joined,
+        how='left', )
+    hpg_fl_joined.drop('hpg_store_id', axis=1, inplace=True, errors="ignore")
+
+    store_info = pd.merge(air_store_info, hpg_fl_joined, how='left')
+    store_info.rename(
+        {
+            'air_genre_name': 'genre_name',
+            'air_area_name': 'area_name',
+        },
+        axis='columns',
+        inplace=True)
+    
     # region by location
     for loc_vars in [['latitude', 'longitude'],
-                     ['hpb_latitude', 'hpb_longitude']]:
+                     ['hpg_latitude', 'hpg_longitude']]:
         if len(loc_vars[0].split('_')) > 1:
             src = loc_vars[0].split('_')[0]
         else:
@@ -276,9 +284,8 @@ def add_area_loc_stat(tidy_df, data):
         store_info['{}_loc'.format(src)] = store_info[loc_vars].apply(
             lambda x: '_'.join(x), axis=1)
         store_info = store_info.drop(loc_vars, axis=1, errors='ignore')
-
     # stores' number in region/ area
-    for grp_key in ['air_loc', 'hpb_loc', 'area_name', 'hpb_area_name']:
+    for grp_key in ['air_loc', 'hpg_loc', 'area_name', 'hpg_area_name']:
         var_name = 'stores_in_{}'.format(grp_key)
         agg = store_info.groupby(grp_key)['air_store_id'].count()
         agg = pd.DataFrame(agg, columns=[agg.name])
@@ -290,14 +297,16 @@ def add_area_loc_stat(tidy_df, data):
         store_info = pd.merge(store_info, agg, on=grp_key, how='left')
 
     tidy_df = pd.merge(tidy_df, store_info, how='left', on='air_store_id')
-    return tidy_df, ['genre_name', 'area_name', 'hpb_genre_name',
-                     'hpb_area_name', 'air_loc', 'hpb_loc'], ['stores_in_air_loc',
-                                                              'stores_in_hpb_loc', 'stores_in_area_name', 'stores_in_hpb_area_name', ]
+    return tidy_df, ['genre_name', 'area_name', 'hpg_genre_name',
+                     'hpg_area_name', 'air_loc', 'hpg_loc'], ['stores_in_air_loc',
+                                                              'stores_in_hpg_loc', 'stores_in_area_name', 'stores_in_hpg_area_name', ]
 
 
 def add_attr_static(tidy_df, attrs):
     "add_attr_static"
     # region/ area's statis
+    contins = []
+    pre_vars = tidy_df.columns
     for key in attrs:
         agg = tidy_df.groupby(key)['visitors'].agg(
             [np.min, np.max, np.mean, np.std]).rename(
@@ -308,5 +317,7 @@ def add_attr_static(tidy_df, attrs):
                     'std': 'std_{}_in_{}'.format('visits', key)
                 })
         agg.reset_index(inplace=True)
+        contins.extend(agg.columns)
         tidy_df = pd.merge(tidy_df, agg, how='left', on=key)
-    return tidy_df
+                
+    return tidy_df, [], list(set(contins) - set(pre_vars))
