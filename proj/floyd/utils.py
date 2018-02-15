@@ -29,14 +29,17 @@ def add_prop(trn, ts_feat):
 
 
 def add_wea(trn, wea):
-    ' add prophet features to train like dataframe'
-
+    ' add prophet features to train like dataframe'    
     wea = wea[['visit_date', 'air_store_id', 'avg_temperature',
                'hours_sunlight','solar_radiation', 'total_snowfall', 'avg_humidity', ]]
     wea_df = wea.sort_values(['air_store_id', 'visit_date']).fillna(
         method='bfill', axis=1)
+    trn.visit_date = trn.visit_date.astype('str')
+    wea_df.visit_date = wea_df.visit_date.astype('str')
     en_trn = pd.merge(trn, wea_df, how='left', on=[
                       'visit_date', 'air_store_id'])
+    en_trn.visit_date = pd.to_datetime(en_trn.visit_date)
+
     return en_trn, [], ['avg_temperature',
                'hours_sunlight','solar_radiation', 'total_snowfall', 'avg_humidity']
 
@@ -59,12 +62,14 @@ def add_holiday_stat(tidy_df, hol):
     hol = add_ts_elapsed(fld, ['dur_'], hol)
     str_date_hol = hol
     str_date_hol.Date = str_date_hol.Date.astype('str')
+    tidy_df.visit_date = tidy_df.visit_date.astype('str')
     tidy_df = pd.merge(
         tidy_df,
         str_date_hol,
         how='left',
         left_on='visit_date',
         right_on='Date')
+    tidy_df.visit_date = pd.to_datetime(tidy_df.visit_date)
     return tidy_df, ['holiday_flg', 'af_holiday_flg',
                      'be_holiday_flg', 'dur_time_holiday_flg', 'dur_holiday_flg',
                      'dur_prog_holiday_flg', ], []
@@ -302,13 +307,13 @@ def add_area_loc_stat(tidy_df, data):
                                                               'stores_in_hpg_loc', 'stores_in_area_name', 'stores_in_hpg_area_name', ]
 
 
-def add_attr_static(tidy_df, attrs):
+def add_attr_static(tidy_df, data_statics, attrs):
     "add_attr_static"
     # region/ area's statis
     contins = []
     pre_vars = tidy_df.columns
     for key in attrs:
-        agg = tidy_df.groupby(key)['visitors'].agg(
+        agg = data_statics.groupby(key)['visitors'].agg(
             [np.min, np.max, np.mean, np.std]).rename(
                 columns={
                     'amin': 'min_{}_in_{}'.format('visits', key),
@@ -318,6 +323,12 @@ def add_attr_static(tidy_df, attrs):
                 })
         agg.reset_index(inplace=True)
         contins.extend(agg.columns)
-        tidy_df = pd.merge(tidy_df, agg, how='left', on=key)
+        tidy_df = pd.merge(tidy_df, agg[[
+            'min_{}_in_{}'.format('visits', key),
+            'max_{}_in_{}'.format('visits', key),
+            'mean_{}_in_{}'.format('visits', key),
+            'std_{}_in_{}'.format('visits', key),
+            key
+            ]], how='left', on=key)
                 
     return tidy_df, [], list(set(contins) - set(pre_vars))
