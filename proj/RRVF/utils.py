@@ -56,6 +56,8 @@ def add_rolling_stat(dataset, period='60d', grp_keys=['air_store_id']):
 
     def func(a_store_df, period=period):
         a_store_df = a_store_df.set_index('visit_date')
+        a_store_df = a_store_df.sort_index()
+        # print(a_store_df["visitors"].rolling(period))
         rolling_max = a_store_df["visitors"].rolling(period).max().shift(1)
         rolling_min = a_store_df["visitors"].rolling(period).min().shift(1)
         rolling_median = a_store_df["visitors"].rolling(
@@ -91,16 +93,14 @@ def add_rolling_stat(dataset, period='60d', grp_keys=['air_store_id']):
             a_store_df = pd.merge(
                 a_store_df, stat, on='visit_date', how='left')
         return a_store_df
-    print('before groupby')
     trn = trn.groupby(grp_keys).apply(func)
-    print('after groupby')
     trn.index = trn.index.droplevel()
     trn = trn.drop('visitors', axis='columns', errors='ignore')
     trn.visit_date = trn.visit_date.astype('str')
     dataset.visit_date = dataset.visit_date.astype('str')
-    cols = list(set(trn.columns) - set(grp_keys)) + ['air_store_id']
+    cols = list(set(trn.columns)) #  - set(grp_keys)) + ['air_store_id']
     trn = pd.merge(dataset, trn[cols], how='left',
-                   on=['air_store_id', 'visit_date'])
+                   on=['visit_date']+grp_keys )
 #     display(trn.head())
     return trn, [], list(set(trn.columns) - set(pre_vars))
 
