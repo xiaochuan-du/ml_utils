@@ -34,7 +34,7 @@ import luigi
 import luigi.contrib.hadoop
 import luigi.contrib.hdfs
 import luigi.contrib.postgres
-from fastai.structured import *
+from utils import proc_df as proc_df
 
 import pandas as pd
 import numpy as np
