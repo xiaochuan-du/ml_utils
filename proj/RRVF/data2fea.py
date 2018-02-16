@@ -16,6 +16,7 @@
 #
 
 import random
+from functools import reduce
 import pickle as pkl
 from collections import defaultdict
 from heapq import nlargest
@@ -102,10 +103,10 @@ class BasicFeas(luigi.Task):
             'wea': pd.read_csv('{}weather_data_merge.csv'.format(PATH))
         }
 
-        cat_vars = ['air_store_id', 'visit_Year', 'visit_Month', 
+        cat_vars = ['air_store_id', 'visit_Year', 'visit_Month',
                     'visit_Week', 'visit_Day', 'visit_Dayofweek', 'visit_Dayofyear',
-                    'visit_Is_month_end', 'visit_Is_month_start', 
-                    'visit_Is_quarter_end', 'visit_Is_quarter_start', 
+                    'visit_Is_month_end', 'visit_Is_month_start',
+                    'visit_Is_quarter_end', 'visit_Is_quarter_start',
                     'visit_Is_year_end', 'visit_Is_year_start',
                     'visit_Elapsed', 'day_of_week']  # default settings
         contin_vars = []
@@ -118,14 +119,16 @@ class BasicFeas(luigi.Task):
         dataset.drop('Date', axis=1, inplace=True, errors='ignore')
         cat_vars.extend(cats)
         contin_vars.extend(contins)
-        
+
         dataset, cats, contins = utils.add_area_loc_stat(dataset, data)
         cat_vars.extend(cats)
         contin_vars.extend(contins)
-        
+
         data_statics, _, _ = utils.add_area_loc_stat(data['tra'], data)
-        static_attrs = ['area_name', 'air_loc'] # 'air_store_id', ,  'hpg_loc', 
-        dataset, cats, contins = utils.add_attr_static(dataset, data_statics, static_attrs)
+        # 'air_store_id', ,  'hpg_loc',
+        static_attrs = ['area_name', 'air_loc']
+        dataset, cats, contins = utils.add_attr_static(
+            dataset, data_statics, static_attrs)
         cat_vars.extend(cats)
         contin_vars.extend(contins)
         dataset.visit_date = pd.to_datetime(dataset.visit_date)
@@ -133,7 +136,154 @@ class BasicFeas(luigi.Task):
 
         dataset.to_feather(self.output().path)
         pkl.dump(contin_vars, open(f'{RESULT}basic_contin_vars.pkl', 'wb'))
-        pkl.dump(cat_vars, open(f'{RESULT}basic_cat_vars.pkl','wb'))
+        pkl.dump(cat_vars, open(f'{RESULT}basic_cat_vars.pkl', 'wb'))
+
+
+class StoreTsFeas(luigi.Task):
+    """
+    This task runs over the target data returned by :py:meth:`~/.Streams.output` and
+    writes the result into its :py:meth:`~.AggregateArtists.output` target (local file).
+    """
+    period = luigi.Parameter()
+
+    def output(self):
+        """
+        Returns the target output for this task.
+        In this case, a successful execution of this task will create a file on the local filesystem.
+        :return: the target output for this task.
+        :rtype: object (:py:class:`luigi.target.Target`)
+        """
+        return luigi.LocalTarget('{}_{}_store'.format(RESULT, self.period))
+
+    def requires(self):
+        """
+        This task's dependencies:
+        * :py:class:`~.Streams`
+        :return: list of object (:py:class:`luigi.task.Task`)
+        """
+        return BasicFeas()
+
+    def run(self):
+        dataset = pd.read_feather(self.input().path)
+        contin_vars = pkl.load(open(f'{RESULT}basic_contin_vars.pkl', 'rb'))
+        cat_vars = pkl.load(open(f'{RESULT}basic_cat_vars.pkl', 'rb'))
+
+        dataset, cats, contins = utils.add_rolling_stat(
+            dataset, self.period, ['air_store_id'])
+        cat_vars.extend(cats)
+        contin_vars.extend(contins)
+
+        dataset.visit_date = pd.to_datetime(dataset.visit_date)
+        dataset.visit_date = dataset.visit_date.dt.date
+
+        pkl.dump(contin_vars, open(
+            '{}_{}_store_contin_vars.pkl'.format(RESULT, self.period), 'wb'))
+        pkl.dump(cat_vars, open(
+            '{}_{}_store_cat_vars.pkl'.format(RESULT, self.period), 'wb'))
+        dataset.to_feather(self.output().path)
+
+
+class StoreDowTsFeas(luigi.Task):
+    """
+    This task runs over the target data returned by :py:meth:`~/.Streams.output` and
+    writes the result into its :py:meth:`~.AggregateArtists.output` target (local file).
+    """
+    period = luigi.Parameter()
+
+    def output(self):
+        """
+        Returns the target output for this task.
+        In this case, a successful execution of this task will create a file on the local filesystem.
+        :return: the target output for this task.
+        :rtype: object (:py:class:`luigi.target.Target`)
+        """
+        return luigi.LocalTarget('{}_{}_store_dow'.format(RESULT, self.period))
+
+    def requires(self):
+        """
+        This task's dependencies:
+        * :py:class:`~.Streams`
+        :return: list of object (:py:class:`luigi.task.Task`)
+        """
+        return BasicFeas()
+
+    def run(self):
+        dataset = pd.read_feather(self.input().path)
+        contin_vars = pkl.load(open(f'{RESULT}basic_contin_vars.pkl', 'rb'))
+        cat_vars = pkl.load(open(f'{RESULT}basic_cat_vars.pkl', 'rb'))
+
+        dataset, cats, contins = utils.add_rolling_stat(
+            dataset, self.period, ['air_store_id', 'visit_Dayofweek'])
+        cat_vars.extend(cats)
+        contin_vars.extend(contins)
+
+        dataset.visit_date = pd.to_datetime(dataset.visit_date)
+        dataset.visit_date = dataset.visit_date.dt.date
+
+        pkl.dump(contin_vars, open(
+            '{}_{}_store_dow_contin_vars.pkl'.format(RESULT, self.period), 'wb'))
+        pkl.dump(cat_vars, open(
+            '{}_{}_store_dow_cat_vars.pkl'.format(RESULT, self.period), 'wb'))
+        dataset.to_feather(self.output().path)
+
+
+class AggTsFeas(luigi.Task):
+    """
+    This task runs over the target data returned by :py:meth:`~/.AggregateArtists.output` or
+    :py:meth:`~/.AggregateArtistsHadoop.output` in case :py:attr:`~/.Top10Artists.use_hadoop` is set and
+    writes the result into its :py:meth:`~.Top10Artists.output` target (a file in local filesystem).
+    """
+
+    def requires(self):
+        """
+        This task's dependencies:
+        * :py:class:`~.AggregateArtists` or
+        * :py:class:`~.AggregateArtistsHadoop` if :py:attr:`~/.Top10Artists.use_hadoop` is set.
+        :return: object (:py:class:`luigi.task.Task`)
+        """
+        periods = ['30d', '60d', '90d', '180d', '360d']
+        return [StoreDowTsFeas(prd) for prd in periods] + [StoreTsFeas(prd) for prd in periods]
+
+    def output(self):
+        """
+        Returns the target output for this task.
+        In this case, a successful execution of this task will create a file on the local filesystem.
+        :return: the target output for this task.
+        :rtype: object (:py:class:`luigi.target.Target`)
+        """
+        return luigi.LocalTarget('{}agg_feas'.format(RESULT))
+
+    def run(self):
+        dfs = []
+        contins = []
+        cats = []
+        for input_file in self.input():
+            data_file = input_file.path
+            dataset = pd.read_feather(data_file)
+            contin_vars = pkl.load(
+                open('{}_contin_vars.pkl'.format(data_file), 'rb'))
+            cat_vars = pkl.load(
+                open('{}_cat_vars.pkl'.format(data_file), 'rb'))
+            dfs.append(dataset)
+            contins.append(contin_vars)
+            cats.append(cat_vars)
+        contin_vars = reduce(lambda x, y: list(
+            set(x) | set(y)), contins, contins[0])
+        cat_vars = reduce(lambda x, y: list(set(x) | set(y)), cats, cats[0])
+        cols = [ list(df.columns) for df in dfs ]
+        base_cols = reduce(lambda x, y: list(
+            set(x) & set(y)), cols, cols[0])
+
+        dataset = pd.concat(
+            [ dfs[0][base_cols] ] + [df[list(set(df.columns) - set(base_cols))] for df in dfs]
+            , axis=1)
+
+        pkl.dump(contin_vars, open(
+            '{}_agg_feas_contin_vars.pkl'.format(RESULT), 'wb'))
+        pkl.dump(cat_vars, open(
+            '{}_agg_feas_cat_vars.pkl'.format(RESULT), 'wb'))
+        dataset.to_feather(self.output().path)
+
 
 # class StreamsHdfs(Streams):
 #     """
@@ -199,56 +349,6 @@ class BasicFeas(luigi.Task):
 #         :return: tuple (artist, count of streams)
 #         """
 #         yield key, sum(values)
-
-
-# class Top10Artists(luigi.Task):
-#     """
-#     This task runs over the target data returned by :py:meth:`~/.AggregateArtists.output` or
-#     :py:meth:`~/.AggregateArtistsHadoop.output` in case :py:attr:`~/.Top10Artists.use_hadoop` is set and
-#     writes the result into its :py:meth:`~.Top10Artists.output` target (a file in local filesystem).
-#     """
-
-#     date_interval = luigi.DateIntervalParameter()
-#     use_hadoop = luigi.BoolParameter()
-
-#     def requires(self):
-#         """
-#         This task's dependencies:
-#         * :py:class:`~.AggregateArtists` or
-#         * :py:class:`~.AggregateArtistsHadoop` if :py:attr:`~/.Top10Artists.use_hadoop` is set.
-#         :return: object (:py:class:`luigi.task.Task`)
-#         """
-#         if self.use_hadoop:
-#             return AggregateArtistsHadoop(self.date_interval)
-#         else:
-#             return AggregateArtists(self.date_interval)
-
-#     def output(self):
-#         """
-#         Returns the target output for this task.
-#         In this case, a successful execution of this task will create a file on the local filesystem.
-#         :return: the target output for this task.
-#         :rtype: object (:py:class:`luigi.target.Target`)
-#         """
-#         return luigi.LocalTarget("data/top_artists_%s.tsv" % self.date_interval)
-
-#     def run(self):
-#         top_10 = nlargest(10, self._input_iterator())
-#         with self.output().open('w') as out_file:
-#             for streams, artist in top_10:
-#                 out_line = '\t'.join([
-#                     str(self.date_interval.date_a),
-#                     str(self.date_interval.date_b),
-#                     artist,
-#                     str(streams)
-#                 ])
-#                 out_file.write((out_line + '\n'))
-
-#     def _input_iterator(self):
-#         with self.input().open('r') as in_file:
-#             for line in in_file:
-#                 artist, streams = line.strip().split()
-#                 yield int(streams), artist
 
 
 # class ArtistToplistToDatabase(luigi.contrib.postgres.CopyToTable):
