@@ -2,6 +2,66 @@ import pandas as pd
 import numpy as np
 
 
+def add_rolling_stat(dataset, period='60d', grp_keys=['air_store_id']):
+    # todo fix test init values
+    " add_rolling_stat"
+    pre_vars = dataset.columns
+    trn = dataset[['visitors', 
+                   'visit_date'
+                  ]  + grp_keys].copy()
+    trn.visit_date = pd.to_datetime(trn.visit_date)
+
+    def func(a_store_df, period=period):
+        a_store_df = a_store_df.set_index('visit_date')
+        rolling_max = a_store_df["visitors"].rolling(period).max().shift(1)
+        rolling_min = a_store_df["visitors"].rolling(period).min().shift(1)
+        rolling_median = a_store_df["visitors"].rolling(
+            period).median().shift(1)
+        rolling_std = a_store_df["visitors"].rolling(period).std().shift(1)
+        rolling_cnt = a_store_df["visitors"].rolling(period).count().shift(1)
+        rolling_mean = a_store_df["visitors"].rolling(period).mean().shift(1)
+        rolling_skew = a_store_df["visitors"].rolling(period).skew().shift(1)
+        
+        
+        a_store_df = a_store_df.reset_index()
+        for stat, var_name in zip([
+            rolling_max, 
+            rolling_min, 
+            rolling_median, 
+            rolling_std,
+            rolling_cnt,
+            rolling_mean,
+            rolling_skew],
+          [
+              "rolling_{}_{}_max".format('_'.join(grp_keys), period), 
+              "rolling_{}_{}_min".format('_'.join(grp_keys), period),
+              "rolling_{}_{}_median".format('_'.join(grp_keys), period),
+              "rolling_{}_{}_std".format('_'.join(grp_keys), period),
+              "rolling_{}_{}_cnt".format('_'.join(grp_keys), period),
+              "rolling_{}_{}_mean".format('_'.join(grp_keys), period),
+              "rolling_{}_{}_skew".format('_'.join(grp_keys), period)]):
+            stat = pd.DataFrame(stat).reset_index()
+            stat = stat.rename(
+                {
+                    'visitors': var_name,
+                }, axis="columns"
+            )
+            a_store_df = pd.merge(
+                a_store_df, stat, on='visit_date', how='left')
+        return a_store_df
+    print('before groupby')
+    trn = trn.groupby(grp_keys).apply(func)
+    print('after groupby')
+    trn.index = trn.index.droplevel()
+    trn = trn.drop('visitors', axis='columns', errors='ignore')
+    trn.visit_date = trn.visit_date.astype('str')
+    dataset.visit_date = dataset.visit_date.astype('str')
+    cols = list(set(trn.columns) - set(grp_keys)) + ['air_store_id']
+    trn = pd.merge(dataset, trn[cols], how='left', on=['air_store_id', 'visit_date'])
+#     display(trn.head())
+    return trn, [], list(set(trn.columns) - set(pre_vars))
+
+
 def tes2trn(tes):
     tes = tes.assign(
         air_store_id=tes["id"].map(lambda x: '_'.join(x.split('_')[:-1])))
