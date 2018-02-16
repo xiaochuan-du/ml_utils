@@ -1,6 +1,11 @@
 import re
 import pandas as pd
 import numpy as np
+from pandas.api.types import is_string_dtype, is_numeric_dtype
+import warnings
+import sklearn
+from sklearn.preprocessing import LabelEncoder, Imputer, StandardScaler
+from sklearn_pandas import DataFrameMapper
 
 
 def add_datepart(df, fldname, drop=True):
@@ -669,3 +674,4 @@ def proc_df(df, y_fld, skip_flds=None, do_scale=False, na_dict=None,
     res = [pd.get_dummies(df, dummy_na=True), y, na_dict]
     if do_scale: res = res + [mapper]
     return res
+

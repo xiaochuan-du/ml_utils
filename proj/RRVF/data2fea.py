@@ -40,7 +40,7 @@ import pandas as pd
 import numpy as np
 import utils
 
-PATH = "../../../data/RRVF/"
+PATH = 'data/' # "../../../data/RRVF/"
 RESULT = "result/"
 
 
