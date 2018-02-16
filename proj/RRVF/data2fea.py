@@ -14,6 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+# ts_prep = pickle.load(open('{}ts_prep.pkl'.format(PATH), 'rb'))
+# train_set, cats, contins = utils.add_prop(train_set, ts_prep)
+# valid_set, *_ = utils.add_prop(valid_set, ts_prep)
+# test_set,*_ = utils.add_prop(test_set, ts_prep)
+# cat_vars.extend(cats)
+# contin_vars.extend(contins)
+
 
 import random
 from functools import reduce
@@ -27,6 +34,7 @@ import luigi
 import luigi.contrib.hadoop
 import luigi.contrib.hdfs
 import luigi.contrib.postgres
+from fastai.structured import *
 
 import pandas as pd
 import numpy as np
@@ -285,104 +293,148 @@ class AggTsFeas(luigi.Task):
         dataset.to_feather(self.output().path)
 
 
-# class StreamsHdfs(Streams):
-#     """
-#     This task performs the same work as :py:class:`~.Streams` but its output is written to HDFS.
-#     This class uses :py:meth:`~.Streams.run` and
-#     overrides :py:meth:`~.Streams.output` so redefine HDFS as its target.
-#     """
+def apply_cats(df, trn):
+    """Changes any columns of strings in df into categorical variables using trn as
+    a template for the category codes.
 
-#     def output(self):
-#         """
-#         Returns the target output for this task.
-#         In this case, a successful execution of this task will create a file in HDFS.
-#         :return: the target output for this task.
-#         :rtype: object (:py:class:`luigi.target.Target`)
-#         """
-#         return luigi.contrib.hdfs.HdfsTarget(self.date.strftime('data/streams_%Y_%m_%d_faked.tsv'))
+    Parameters:
+    -----------
+    df: A pandas dataframe. Any columns of strings will be changed to
+        categorical values. The category codes are determined by trn.
 
+    trn: A pandas dataframe. When creating a category for df, it looks up the
+        what the category's code were in trn and makes those the category codes
+        for df.
 
-# class AggregateArtistsHadoop(luigi.contrib.hadoop.JobTask):
-#     """
-#     This task runs a :py:class:`luigi.contrib.hadoop.JobTask` task
-#     over each target data returned by :py:meth:`~/.StreamsHdfs.output` and
-#     writes the result into its :py:meth:`~.AggregateArtistsHadoop.output` target (a file in HDFS).
-#     This class uses :py:meth:`luigi.contrib.spark.SparkJob.run`.
-#     """
+    Examples:
+    ---------
+    >>> df = pd.DataFrame({'col1' : [1, 2, 3], 'col2' : ['a', 'b', 'a']})
+    >>> df
+       col1 col2
+    0     1    a
+    1     2    b
+    2     3    a
 
-#     date_interval = luigi.DateIntervalParameter()
+    note the type of col2 is string
 
-#     def output(self):
-#         """
-#         Returns the target output for this task.
-#         In this case, a successful execution of this task will create a file in HDFS.
-#         :return: the target output for this task.
-#         :rtype: object (:py:class:`luigi.target.Target`)
-#         """
-#         return luigi.contrib.hdfs.HdfsTarget(
-#             "data/artist_streams_%s.tsv" % self.date_interval,
-#             format=luigi.contrib.hdfs.PlainDir
-#         )
+    >>> train_cats(df)
+    >>> df
 
-#     def requires(self):
-#         """
-#         This task's dependencies:
-#         * :py:class:`~.StreamsHdfs`
-#         :return: list of object (:py:class:`luigi.task.Task`)
-#         """
-#         return [StreamsHdfs(date) for date in self.date_interval]
+       col1 col2
+    0     1    a
+    1     2    b
+    2     3    a
 
-#     def mapper(self, line):
-#         """
-#         The implementation of the map phase of the Hadoop job.
-#         :param line: the input.
-#         :return: tuple ((key, value) or, in this case, (artist, 1 stream count))
-#         """
-#         _, artist, _ = line.strip().split()
-#         yield artist, 1
+    now the type of col2 is category {a : 1, b : 2}
 
-#     def reducer(self, key, values):
-#         """
-#         The implementation of the reducer phase of the Hadoop job.
-#         :param key: the artist.
-#         :param values: the stream count.
-#         :return: tuple (artist, count of streams)
-#         """
-#         yield key, sum(values)
+    >>> df2 = pd.DataFrame({'col1' : [1, 2, 3], 'col2' : ['b', 'a', 'a']})
+    >>> apply_cats(df2, df)
+
+           col1 col2
+        0     1    b
+        1     2    a
+        2     3    a
+
+    now the type of col is category {a : 1, b : 2}
+    """
+    for n, c in df.items():
+        if (n in trn.columns) and (trn[n].dtype.name=='category'):
+            df[n] = pd.Categorical(c, categories=trn[n].cat.categories, ordered=True)
 
 
-# class ArtistToplistToDatabase(luigi.contrib.postgres.CopyToTable):
-#     """
-#     This task runs a :py:class:`luigi.contrib.postgres.CopyToTable` task
-#     over the target data returned by :py:meth:`~/.Top10Artists.output` and
-#     writes the result into its :py:meth:`~.ArtistToplistToDatabase.output` target which,
-#     by default, is :py:class:`luigi.contrib.postgres.PostgresTarget` (a table in PostgreSQL).
-#     This class uses :py:meth:`luigi.contrib.postgres.CopyToTable.run`
-#     and :py:meth:`luigi.contrib.postgres.CopyToTable.output`.
-#     """
+def dataset_split(data_raw):
+    "dataset_split"
+    def split(df):
+        trn_len = int(np.floor(len(df) * 0.9))
+        valid_len = len(df) - trn_len
+        df['type'] = 0  #0 for train 1 for valid
+        indexs = df.index
+        df = df.reset_index()
+        df.loc[trn_len:, 'type'] =  1
+        return df
+    
+    test = pd.read_csv('{}sample_submission.csv'.format(PATH))
+    test_data = utils.tes2trn(test)
+    test_stores = test_data.air_store_id.unique()
+    data_raw.visit_date = data_raw.visit_date.astype('str')
+    test_data.visit_date = test_data.visit_date.astype('str')
+    test_set = data_raw[data_raw.visit_date.isin(test_data.visit_date.unique())]
+    data_raw = data_raw[~data_raw.visit_date.isin(test_data.visit_date.unique())]
+    data = data_raw[data_raw.air_store_id.isin(test_stores)]
+    tag_data = data.groupby('air_store_id').apply(split)
+    t = tag_data.set_index('index')
+    train_set = t[t.type == 0]
+    valid_set = t[t.type == 1]
+    train_set = train_set.reset_index().drop(['index', 'type'], axis=1)
+    valid_set = valid_set.reset_index().drop(['index', 'type'], axis=1)
+    return train_set, valid_set, test_set
 
-#     date_interval = luigi.DateIntervalParameter()
-#     use_hadoop = luigi.BoolParameter()
+class DataSplits(luigi.Task):
+    """
+    This task runs over the target data returned by :py:meth:`~/.AggregateArtists.output` or
+    :py:meth:`~/.AggregateArtistsHadoop.output` in case :py:attr:`~/.Top10Artists.use_hadoop` is set and
+    writes the result into its :py:meth:`~.Top10Artists.output` target (a file in local filesystem).
+    """
 
-#     host = "localhost"
-#     database = "toplists"
-#     user = "luigi"
-#     password = "abc123"  # ;)
-#     table = "top10"
+    def requires(self):
+        """
+        This task's dependencies:
+        * :py:class:`~.AggregateArtists` or
+        * :py:class:`~.AggregateArtistsHadoop` if :py:attr:`~/.Top10Artists.use_hadoop` is set.
+        :return: object (:py:class:`luigi.task.Task`)
+        """
+        return AggTsFeas()
 
-#     columns = [("date_from", "DATE"),
-#                ("date_to", "DATE"),
-#                ("artist", "TEXT"),
-#                ("streams", "INT")]
+    def output(self):
+        """
+        Returns the target output for this task.
+        In this case, a successful execution of this task will create a file on the local filesystem.
+        :return: the target output for this task.
+        :rtype: object (:py:class:`luigi.target.Target`)
+        """
+        return luigi.LocalTarget('{}_datasplits.pkl'.format(RESULT))
 
-#     def requires(self):
-#         """
-#         This task's dependencies:
-#         * :py:class:`~.Top10Artists`
-#         :return: list of object (:py:class:`luigi.task.Task`)
-#         """
-#         return Top10Artists(self.date_interval, self.use_hadoop)
 
+
+    def run(self):
+        dataset = pd.read_feather(self.input().path)
+        contin_vars = pkl.load(open(f'{RESULT}_agg_feas_contin_vars.pkl', 'rb'))
+        cat_vars = pkl.load(open(f'{RESULT}_agg_feas_cat_vars.pkl', 'rb'))
+
+        train_set, valid_set, test_set = dataset_split(dataset)
+        dep = 'visitors'
+
+        n = len(train_set)
+        train_set = train_set[cat_vars+contin_vars+[dep, 'visit_date']].copy()
+        valid_set = valid_set[cat_vars+contin_vars+[dep, 'visit_date']].copy()
+        test_set = test_set[cat_vars+contin_vars+[dep, 'visit_date']].copy()
+        for v in cat_vars: 
+            train_set[v] = train_set[v].astype('category').cat.as_ordered()
+        apply_cats(test_set, train_set)
+        apply_cats(valid_set, train_set)
+
+        valid_set = valid_set.set_index("visit_date")
+        train_set = train_set.set_index("visit_date")
+        test_set = test_set.set_index("visit_date")
+
+        df, y, nas, mapper = proc_df(train_set, 'visitors', do_scale=True)
+        yl = np.log1p(y)
+        df_val, y_val, _, _ = proc_df(valid_set, 'visitors', do_scale=True, #  skip_flds=['Id'],
+                                        mapper=mapper, na_dict=nas)
+        y2 = np.log1p(y_val)
+        df_test, _, _, _ = proc_df(test_set, 'visitors', do_scale=True, # skip_flds=['Id'],
+                                        mapper=mapper, na_dict=nas)
+        output_dict = {
+            'contin_vars': contin_vars,
+            'cat_vars': cat_vars,
+            'trn': df,
+            'trn_y': yl,
+            'val': df_val,
+            'val_y': y2,
+            'test': df_test
+        }
+        pkl.dump(output_dict, open(
+            '{}_datasplits.pkl'.format(RESULT), 'wb'))
 
 if __name__ == "__main__":
     luigi.run()

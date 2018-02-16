@@ -1,2 +1,2 @@
 #/bin/bash
-PYTHONPATH='.' luigi --module data2fea AggTsFeas --local-scheduler --workers=1
+PYTHONPATH='.' luigi --module data2fea DataSplits --local-scheduler --workers=1
