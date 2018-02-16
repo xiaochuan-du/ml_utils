@@ -1,22 +1,181 @@
-import numpy as np
+import re
 import pandas as pd
-from sklearn_pandas import DataFrameMapper
-from sklearn.preprocessing import LabelEncoder, Imputer, StandardScaler
-import math
-from pandas_summary import DataFrameSummary
-import pickle as pkl
-from keras.layers import Concatenate, Dense, Dropout, Embedding, Flatten, Input, BatchNormalization
-from keras import initializers
-from keras.models import Model
-from keras import backend as K
-from keras.optimizers import Adam
+import numpy as np
 
-FORCE_CAT = [
-    'dur_time_holiday_flg', 'visit_date_week', 'visit_date_dayofweek',
-    'visit_date_month', 'dur_holiday_flg', 'dur_prog_holiday_flg', 'air_loc',
-    'hpb_loc'
-]
-FORCE_Y = ['visitors']
+
+def add_datepart(df, fldname, drop=True):
+    """add_datepart converts a column of df from a datetime64 to many columns containing
+    the information from the date. This applies changes inplace.
+
+    Parameters:
+    -----------
+    df: A pandas data frame. df gain several new columns.
+    fldname: A string that is the name of the date column you wish to expand.
+        If it is not a datetime64 series, it will be converted to one with pd.to_datetime.
+    drop: If true then the original date column will be removed.
+
+    Examples:
+    ---------
+
+    >>> df = pd.DataFrame({ 'A' : pd.to_datetime(['3/11/2000', '3/12/2000', '3/13/2000'], infer_datetime_format=False) })
+    >>> df
+
+        A
+    0   2000-03-11
+    1   2000-03-12
+    2   2000-03-13
+
+    >>> add_datepart(df, 'A')
+    >>> df
+
+        AYear AMonth AWeek ADay ADayofweek ADayofyear AIs_month_end AIs_month_start AIs_quarter_end AIs_quarter_start AIs_year_end AIs_year_start AElapsed
+    0   2000  3      10    11   5          71         False         False           False           False             False        False          952732800
+    1   2000  3      10    12   6          72         False         False           False           False             False        False          952819200
+    2   2000  3      11    13   0          73         False         False           False           False             False        False          952905600
+    """
+    fld = df[fldname]
+    if not np.issubdtype(fld.dtype, np.datetime64):
+        df[fldname] = fld = pd.to_datetime(fld, infer_datetime_format=True)
+    targ_pre = re.sub('[Dd]ate$', '', fldname)
+    for n in ('Year', 'Month', 'Week', 'Day', 'Dayofweek', 'Dayofyear',
+              'Is_month_end', 'Is_month_start', 'Is_quarter_end', 'Is_quarter_start', 'Is_year_end', 'Is_year_start'):
+        df[targ_pre + n] = getattr(fld.dt, n.lower())
+    df[targ_pre + 'Elapsed'] = fld.astype(np.int64) // 10**9
+    if drop:
+        df.drop(fldname, axis=1, inplace=True)
+
+
+def add_rolling_stat(dataset, period='60d', grp_keys=['air_store_id']):
+    # todo fix test init values
+    " add_rolling_stat"
+    pre_vars = dataset.columns
+    trn = dataset[['visitors',
+                   'visit_date'
+                   ] + grp_keys].copy()
+    trn.visit_date = pd.to_datetime(trn.visit_date)
+
+    def func(a_store_df, period=period):
+        a_store_df = a_store_df.set_index('visit_date')
+        rolling_max = a_store_df["visitors"].rolling(period).max().shift(1)
+        rolling_min = a_store_df["visitors"].rolling(period).min().shift(1)
+        rolling_median = a_store_df["visitors"].rolling(
+            period).median().shift(1)
+        rolling_std = a_store_df["visitors"].rolling(period).std().shift(1)
+        rolling_cnt = a_store_df["visitors"].rolling(period).count().shift(1)
+        rolling_mean = a_store_df["visitors"].rolling(period).mean().shift(1)
+        rolling_skew = a_store_df["visitors"].rolling(period).skew().shift(1)
+
+        a_store_df = a_store_df.reset_index()
+        for stat, var_name in zip([
+            rolling_max,
+            rolling_min,
+            rolling_median,
+            rolling_std,
+            rolling_cnt,
+            rolling_mean,
+            rolling_skew],
+            [
+            "rolling_{}_{}_max".format('_'.join(grp_keys), period),
+            "rolling_{}_{}_min".format('_'.join(grp_keys), period),
+            "rolling_{}_{}_median".format('_'.join(grp_keys), period),
+            "rolling_{}_{}_std".format('_'.join(grp_keys), period),
+            "rolling_{}_{}_cnt".format('_'.join(grp_keys), period),
+            "rolling_{}_{}_mean".format('_'.join(grp_keys), period),
+                "rolling_{}_{}_skew".format('_'.join(grp_keys), period)]):
+            stat = pd.DataFrame(stat).reset_index()
+            stat = stat.rename(
+                {
+                    'visitors': var_name,
+                }, axis="columns"
+            )
+            a_store_df = pd.merge(
+                a_store_df, stat, on='visit_date', how='left')
+        return a_store_df
+    print('before groupby')
+    trn = trn.groupby(grp_keys).apply(func)
+    print('after groupby')
+    trn.index = trn.index.droplevel()
+    trn = trn.drop('visitors', axis='columns', errors='ignore')
+    trn.visit_date = trn.visit_date.astype('str')
+    dataset.visit_date = dataset.visit_date.astype('str')
+    cols = list(set(trn.columns) - set(grp_keys)) + ['air_store_id']
+    trn = pd.merge(dataset, trn[cols], how='left',
+                   on=['air_store_id', 'visit_date'])
+#     display(trn.head())
+    return trn, [], list(set(trn.columns) - set(pre_vars))
+
+
+def tes2trn(tes):
+    tes = tes.assign(
+        air_store_id=tes["id"].map(lambda x: '_'.join(x.split('_')[:-1])))
+    tes = tes.assign(visit_date=tes["id"].map(lambda x: x.split('_')[2]))
+    return tes[["air_store_id", "visit_date"]]
+
+
+def add_prop(trn, ts_feat):
+    ' add prophet features to train like dataframe'
+    for model_key in ts_feat.keys():
+        ts_feat[model_key] = ts_feat[model_key].assign(air_store_id=model_key)
+        ts_feat[model_key] = ts_feat[model_key].rename({
+            'ds': 'visit_date',
+        }, axis="columns")
+    concated = pd.concat([res for res in ts_feat.values()], axis=0)
+    concated.yhat = np.exp(concated.yhat.values)
+    concated.visit_date = concated.visit_date.astype('str')
+    name_dict = {col: 'prop_{}'.format(
+        col) for col in concated.columns if col != 'visit_date' and col != 'air_store_id'}
+    concated.rename(columns=dict(name_dict), inplace=True)
+    trn.visit_date = trn.visit_date.astype('str')
+    en_trn = pd.merge(trn, concated[['prop_yhat_lower', 'prop_yhat_upper', 'prop_yhat',
+                                     'visit_date', 'air_store_id']], on=['visit_date', 'air_store_id'], how='left')
+    return en_trn, [], ['prop_yhat_lower', 'prop_yhat_upper', 'prop_yhat']
+
+
+def add_wea(trn, wea):
+    ' add prophet features to train like dataframe'
+    wea = wea[['visit_date', 'air_store_id', 'avg_temperature',
+               'hours_sunlight', 'solar_radiation', 'total_snowfall', 'avg_humidity', ]]
+    wea_df = wea.sort_values(['air_store_id', 'visit_date']).fillna(
+        method='bfill', axis=1)
+    trn.visit_date = trn.visit_date.astype('str')
+    wea_df.visit_date = wea_df.visit_date.astype('str')
+    en_trn = pd.merge(trn, wea_df, how='left', on=[
+                      'visit_date', 'air_store_id'])
+    en_trn.visit_date = pd.to_datetime(en_trn.visit_date)
+
+    return en_trn, [], ['avg_temperature',
+                        'hours_sunlight', 'solar_radiation', 'total_snowfall', 'avg_humidity']
+
+
+def trn2test(tes_in_trn):
+    tes_in_trn['id'] = tes_in_trn[['air_store_id', 'visit_date']].apply(
+        lambda x: '_'.join(x), axis=1)
+    return tes_in_trn[["id", 'visitors']]
+
+
+def add_holiday_stat(tidy_df, hol):
+    # holiday related features
+    hol = hol.rename(
+        {
+            'calendar_date': 'Date',
+        }, axis='columns')
+    hol.Date = pd.to_datetime(hol.Date)
+    fld = 'holiday_flg'
+    hol = add_ts_elapsed(fld, ['af_', 'be_'], hol)
+    hol = add_ts_elapsed(fld, ['dur_'], hol)
+    str_date_hol = hol
+    str_date_hol.Date = str_date_hol.Date.astype('str')
+    tidy_df.visit_date = tidy_df.visit_date.astype('str')
+    tidy_df = pd.merge(
+        tidy_df,
+        str_date_hol,
+        how='left',
+        left_on='visit_date',
+        right_on='Date')
+    tidy_df.visit_date = pd.to_datetime(tidy_df.visit_date)
+    return tidy_df, ['holiday_flg', 'af_holiday_flg',
+                     'be_holiday_flg', 'dur_time_holiday_flg', 'dur_holiday_flg',
+                     'dur_prog_holiday_flg', ], []
 
 
 class TimeToEvent(object):
@@ -107,35 +266,6 @@ def add_ts_elapsed(fld, prefixs, df):
         return df
 
 
-def get_store_stat_tbl(data):
-    "get_store_stat_tbl"
-    reserve = data['reserve']
-    get_info_from_date(reserve, ['reserve_datetime', 'visit_datetime'])
-
-
-def get_info_from_date(data, dt_vars):
-    "get_info_from_date"
-    for dt_var in dt_vars:
-        data[dt_var] = pd.to_datetime(data[dt_var])
-        data["{}_week".format(dt_var)] = data[dt_var].dt.week
-        data["{}_dayofweek".format(dt_var)] = data[dt_var].dt.dayofweek
-        data["{}_year".format(dt_var)] = data[dt_var].dt.year
-        data["{}_month".format(dt_var)] = data[dt_var].dt.month
-
-
-def tes2trn(tes):
-    tes = tes.assign(
-        air_store_id=tes["id"].map(lambda x: '_'.join(x.split('_')[:-1])))
-    tes = tes.assign(visit_date=tes["id"].map(lambda x: x.split('_')[2]))
-    return tes[["air_store_id", "visit_date"]]
-
-
-def trn2test(tes_in_trn):
-    tes_in_trn['id'] = df[['air_store_id', 'visit_date']].apply(
-        lambda x: '_'.join(x), axis=1)
-    return tes_in_trn[["id"]]
-
-
 def get_reserve_tbl(data):
     " get_reserve_tbl "
     hpg_reserve = data['hr']
@@ -218,280 +348,42 @@ def get_reserve_tbl(data):
     return data
 
 
-def inspect_var_type(data, force_cat=FORCE_CAT, force_y=FORCE_Y):
-    " from dataframe to var types"
-
-    summary_df = DataFrameSummary(data).summary()
-    # auto evaluate datatype
-    var_types = {
-        dtype: [
-            col for col in summary_df.columns
-            if summary_df.loc["types"][col] == dtype
-        ]
-        for dtype in ['numeric', 'bool', 'categorical', 'date', 'constant']
-    }
-    guess_cat_vars = var_types['bool'] + var_types['categorical'] + \
-        var_types['date'] + var_types['constant'] + force_cat
-    guess_cat_vars = list(set(guess_cat_vars))
-    guess_contin_vars = list(
-        set(data.columns) - set(guess_cat_vars) - set(force_y))
-    # cat_vars = [
-    #     'genre_name', 'area_name', 'hpb_genre_name', 'hpb_area_name',
-    #     'holiday_flg', 'dur_time_holiday_flg', 'visit_date_week',
-    #     'visit_date_dayofweek', 'visit_date_year', 'visit_date_month',
-    #     'air_store_id'
-    # ]
-    # contin_vars = [
-    #     'latitude', 'longitude', 'hpb_latitude', 'hpb_longitude',
-    #     'af_holiday_flg', 'be_holiday_flg', 'dur_holiday_flg',
-    #     'dur_prog_holiday_flg', 'min_visits', 'max_visits', 'mean_visits',
-    #     'std_visits'
-    # ]
-    return guess_cat_vars, guess_contin_vars
-
-
-def mat2fea(mat, cat_vars, contin_vars):
-    " from feature dataframe to matrix based on type"
-    mat[contin_vars] = mat[contin_vars].astype('float')
-    for v in contin_vars:
-        mat.loc[mat[v].isnull(), v] = 0
-    for v in cat_vars:
-        mat.loc[mat[v].isnull(), v] = ""
-    cat_maps = [(o, LabelEncoder()) for o in cat_vars]
-    contin_maps = [([o], StandardScaler()) for o in contin_vars]
-
-    cat_mapper = DataFrameMapper(cat_maps)
-    cat_map_fit = cat_mapper.fit(mat)
-    cat_cols = len(cat_map_fit.features)
-
-    contin_mapper = DataFrameMapper(contin_maps)
-    contin_map_fit = contin_mapper.fit(mat)
-    contin_cols = len(contin_map_fit.features)
-
-    cat_map = cat_map_fit.transform(mat).astype(np.int64)
-    contin_map = contin_map_fit.transform(mat).astype(np.float)
-
-    return cat_map, contin_map, cat_cols, \
-        contin_cols, cat_map_fit, mat.visitors
-
-
-def ts_data_split(input_map, y, s_i, e_i):
-    output = {'trn': [], 'valid': []}
-    # train_ratio = 0.9
-    # size = y.shape[0]
-    # trn_size = int(train_ratio * size)
-    input_trn = []
-    input_valid = []
-    y_trn = np.concatenate((y.iloc[:s_i].values, y.iloc[e_i:].values), axis=0)
-    y_valid = y.iloc[s_i:e_i]
-    for fea in input_map:
-        input_valid.append(fea[s_i:e_i])
-        input_trn.append(np.concatenate((fea[:s_i], fea[e_i:]), axis=0))
-
-    return input_trn, input_valid, y_trn, y_valid
-
-
-def data_split_by_date(feats, y, date_sr, trn2val_ratio=9, step_days=50):
-    " according to date, split data"
-    data_blocks = []
-    delta = pd.to_timedelta('{} days'.format(step_days))
-    curdt = date_sr.min()
-    while curdt < date_sr.max():
-        data_index = date_sr[(date_sr >= curdt) &
-                             (date_sr < curdt + delta)].index.tolist()
-        trn_size = int(trn2val_ratio / 10.0 * len(data_index))
-        trn_index = data_index[:trn_size]
-        valid_index = data_index[trn_size:]
-        y_trn = y[pd.Index(trn_index)]
-        y_valid = y[pd.Index(valid_index)]
-        if isinstance(feats, list):
-            x_trn = []
-            x_valid = []
-            for feat in feats:
-                x_trn.append(feat[pd.Index(trn_index)])
-                x_valid.append(feat[pd.Index(valid_index)])
-        else:
-            x_trn = feats[pd.Index(trn_index)]
-            x_valid = feats[pd.Index(valid_index)]
-        data_blocks.append({
-            "x_trn": x_trn,
-            "y_trn": y_trn,
-            "x_valid": x_valid,
-            "y_valid": y_valid,
-        })
-        curdt = curdt + delta
-    return data_blocks
-
-
-def uniform_y(y_train_orig, y_valid_orig):
-    max_log_y = max(
-        np.max(np.log1p(y_train_orig)), np.max(np.log1p(y_valid_orig))) * 1.25
-    return np.log1p(y_train_orig) / max_log_y, np.log1p(
-        y_valid_orig) / max_log_y, max_log_y
-
-
-def rmsle(y_pred, targ):
-    log_vars = np.log(targ + 1) - np.log(y_pred + 1)
-    return math.sqrt(np.square(log_vars).mean())
-
-
-def log_max_inv(preds, mx):
-    return np.exp(preds * mx) - 1
-
-
-def my_init(scale):
-    return lambda shape, name=None: initializations.uniform()
-
-
-def emb_init(shape, name=None):
-    return initializers.RandomUniform()
-
-
-def cat_map_info(feat):
-    return feat[0], len(feat[1].classes_)
-
-
-def get_emb(feat):
-    name, c = cat_map_info(feat)
-    c2 = (c + 1) // 2
-    if c2 > 50:
-        c2 = 50
-    inp = Input((1, ), dtype='int64', name=name + '_in')
-    # , W_regularizer=l2(1e-6)
-    u = Flatten(name=name + '_flt')(Embedding(
-        c, c2, input_length=1)(inp))  # , init=emb_init
-    #     u = Flatten(name=name+'_flt')(Embedding(c, c2, input_length=1)(inp))
-    return inp, u
-
-
-def get_contin(feat):
-    name = feat[0][0]
-    inp = Input((1, ), name=name + '_in')
-    return inp, Dense(1, name=name + '_d')(inp)  # , init=my_init(1.)
-
-
-def get_model(contin_cols, cat_map_fit):
-    contin_inp = Input((contin_cols, ), name='contin')
-    contin_out = Dense(
-        contin_cols * 10, activation='relu', name='contin_d')(contin_inp)
-    #contin_out = BatchNormalization()(contin_out)
-    embs = [get_emb(feat) for feat in cat_map_fit.features]
-    #conts = [get_contin(feat) for feat in contin_map_fit.features]
-    #contin_d = [d for inp,d in conts]
-    x = Concatenate()([emb for inp, emb in embs] + [contin_out])
-
-    x = Dropout(0.02)(x)
-    x = Dense(1000, activation='relu', kernel_initializer='uniform')(x)
-    x = Dense(500, activation='relu', kernel_initializer='uniform')(x)
-    x = Dropout(0.2)(x)
-    x = Dense(1, activation='sigmoid')(x)
-
-    model = Model([inp for inp, emb in embs] + [contin_inp], x)
-    model.compile('adam', 'mse')
-    return model
-
-
-def root_mean_squared_logarithmic_error(y_true, y_pred):
-    first_log = K.log(K.clip(y_pred, K.epsilon(), None) + 1.)
-    second_log = K.log(K.clip(y_true, K.epsilon(), None) + 1.)
-    return K.sqrt(K.mean(K.square(first_log - second_log), axis=-1))
-
-
-def get_bn_model(contin_cols, cat_map_fit):
-    contin_inp = Input((contin_cols, ), name='contin')
-    contin_out = Dense(
-        contin_cols * 10,
-        activation='relu',
-        name='contin_d',
-        kernel_initializer='he_uniform')(contin_inp)
-    contin_out = BatchNormalization()(contin_out)
-    #contin_out = BatchNormalization()(contin_out)
-    embs = [get_emb(feat) for feat in cat_map_fit.features]
-    #conts = [get_contin(feat) for feat in contin_map_fit.features]
-    #contin_d = [d for inp,d in conts]
-    x = Concatenate()([emb for inp, emb in embs] + [contin_out])
-
-    # x = Dropout(0.02)(x)
-    # x = BatchNormalization()(x)
-    # x = Dense(1000, activation='relu', kernel_initializer='he_uniform')(x)
-    # x = BatchNormalization()(x)
-    # x = Dense(500, activation='relu', kernel_initializer='he_uniform')(x)
-    x = BatchNormalization()(x)
-    x = Dropout(0.2)(x)
-    x = Dense(1, activation='sigmoid')(x)
-
-    model = Model([inp for inp, emb in embs] + [contin_inp], x)
-    model.compile(Adam(decay=1e-6), loss='mse')
-    return model
-
-
-def split_cols(arr):
-    return np.hsplit(arr, arr.shape[1])
-
-
-def add_rolling_stat(trn, period='60d'):
-    # todo fix test init values
-    " add_rolling_stat"
-    trn_org = trn.copy()
-    trn.visit_date = pd.to_datetime(trn.visit_date)
-
-    def func(a_store_df, period=period):
-        a_store_df = a_store_df.set_index('visit_date')
-        rolling_max = a_store_df["visitors"].rolling(period).max().shift(1)
-        rolling_min = a_store_df["visitors"].rolling(period).min().shift(1)
-        rolling_median = a_store_df["visitors"].rolling(
-            period).median().shift(1)
-        rolling_std = a_store_df["visitors"].rolling(period).std().shift(1)
-        a_store_df = a_store_df.reset_index()
-        for stat, var_name in zip([rolling_max, rolling_min, rolling_median, rolling_std],
-                                  ["rolling_{}_max".format(period), "rolling_{}_min".format(period),
-                                   "rolling_{}_median".format(period), "rolling_{}_std".format(period)]):
-            stat = pd.DataFrame(stat).reset_index()
-            stat = stat.rename(
-                {
-                    'visitors': var_name,
-                }, axis="columns"
-            )
-            a_store_df = pd.merge(
-                a_store_df, stat, on='visit_date', how='left')
-        return a_store_df
-    trn = trn.groupby('air_store_id').apply(func)
-    trn.index = trn.index.droplevel()
-    trn = trn.drop('visitors', axis='columns', errors='ignore')
-    trn.visit_date = trn.visit_date.astype('str')
-    trn = pd.merge(trn_org, trn, how='left', on=['air_store_id', 'visit_date'])
-    return trn
-
-
 def add_area_loc_stat(tidy_df, data):
     """
         merge store info in two systems, and generate area /loc
     """
     # store information related features
-    data = get_reserve_tbl(data)
-    store_info = data["reserve"][[
-        'air_store_id', "src", 'genre_name', 'area_name', 'latitude',
-        'longitude'
-    ]]
-    store_info = store_info.drop_duplicates()
-    air_store_info = store_info[store_info.src == 'air']
-    hpg_store_info = store_info[(store_info.src == 'hpg') &
-                                (~store_info.genre_name.isna())]
-    hpg_store_info = hpg_store_info.rename(
+    hpg_store_info = data['hs']
+    store_id_relation = data['id']
+    air_store_info = data['as']
+
+    hpg_joined = hpg_store_info
+    hpg_joined.rename(
         {
-            'latitude': 'hpb_latitude',
-            'longitude': 'hpb_longitude',
-            'genre_name': 'hpb_genre_name',
-            'area_name': 'hpb_area_name',
+            'latitude': 'hpg_latitude',
+            'longitude': 'hpg_longitude',
         },
-        axis='columns')
-    hpg_store_info = hpg_store_info.drop('src', axis=1, errors="ignore")
-    store_info = pd.merge(air_store_info, hpg_store_info, how='left')
-    store_info = store_info.drop('src', axis=1, errors="ignore")
+        axis='columns',
+        inplace=True)
+
+    hpg_fl_joined = pd.merge(
+        store_id_relation,
+        hpg_joined,
+        how='left', )
+    hpg_fl_joined.drop('hpg_store_id', axis=1, inplace=True, errors="ignore")
+
+    store_info = pd.merge(air_store_info, hpg_fl_joined, how='left')
+    store_info.rename(
+        {
+            'air_genre_name': 'genre_name',
+            'air_area_name': 'area_name',
+        },
+        axis='columns',
+        inplace=True)
 
     # region by location
     for loc_vars in [['latitude', 'longitude'],
-                     ['hpb_latitude', 'hpb_longitude']]:
+                     ['hpg_latitude', 'hpg_longitude']]:
         if len(loc_vars[0].split('_')) > 1:
             src = loc_vars[0].split('_')[0]
         else:
@@ -500,9 +392,8 @@ def add_area_loc_stat(tidy_df, data):
         store_info['{}_loc'.format(src)] = store_info[loc_vars].apply(
             lambda x: '_'.join(x), axis=1)
         store_info = store_info.drop(loc_vars, axis=1, errors='ignore')
-
     # stores' number in region/ area
-    for grp_key in ['air_loc', 'hpb_loc', 'area_name', 'hpb_area_name']:
+    for grp_key in ['air_loc', 'hpg_loc', 'area_name', 'hpg_area_name']:
         var_name = 'stores_in_{}'.format(grp_key)
         agg = store_info.groupby(grp_key)['air_store_id'].count()
         agg = pd.DataFrame(agg, columns=[agg.name])
@@ -514,35 +405,18 @@ def add_area_loc_stat(tidy_df, data):
         store_info = pd.merge(store_info, agg, on=grp_key, how='left')
 
     tidy_df = pd.merge(tidy_df, store_info, how='left', on='air_store_id')
-    return tidy_df
+    return tidy_df, ['genre_name', 'area_name', 'hpg_genre_name',
+                     'hpg_area_name', 'air_loc', 'hpg_loc'], ['stores_in_air_loc',
+                                                              'stores_in_hpg_loc', 'stores_in_area_name', 'stores_in_hpg_area_name', ]
 
 
-def add_holiday_stat(tidy_df, hol):
-    # holiday related features
-    hol = hol.rename(
-        {
-            'calendar_date': 'Date',
-        }, axis='columns')
-    hol.Date = pd.to_datetime(hol.Date)
-    fld = 'holiday_flg'
-    hol = add_ts_elapsed(fld, ['af_', 'be_'], hol)
-    hol = add_ts_elapsed(fld, ['dur_'], hol)
-    str_date_hol = hol
-    str_date_hol.Date = str_date_hol.Date.astype('str')
-    tidy_df = pd.merge(
-        tidy_df,
-        str_date_hol,
-        how='left',
-        left_on='visit_date',
-        right_on='Date')
-    return tidy_df
-
-
-def add_attr_static(tidy_df, attrs):
+def add_attr_static(tidy_df, data_statics, attrs):
     "add_attr_static"
     # region/ area's statis
+    contins = []
+    pre_vars = tidy_df.columns
     for key in attrs:
-        agg = tidy_df.groupby(key)['visitors'].agg(
+        agg = data_statics.groupby(key)['visitors'].agg(
             [np.min, np.max, np.mean, np.std]).rename(
                 columns={
                     'amin': 'min_{}_in_{}'.format('visits', key),
@@ -551,312 +425,13 @@ def add_attr_static(tidy_df, attrs):
                     'std': 'std_{}_in_{}'.format('visits', key)
                 })
         agg.reset_index(inplace=True)
-        tidy_df = pd.merge(tidy_df, agg, how='left', on=key)
-    return tidy_df
+        contins.extend(agg.columns)
+        tidy_df = pd.merge(tidy_df, agg[[
+            'min_{}_in_{}'.format('visits', key),
+            'max_{}_in_{}'.format('visits', key),
+            'mean_{}_in_{}'.format('visits', key),
+            'std_{}_in_{}'.format('visits', key),
+            key
+        ]], how='left', on=key)
 
-
-def add_default_2_tst(tes_like_trn, trn):
-    "add_default_2_tst"
-    hist_df = add_rolling_stat(trn, period='60d')
-
-    def func(a_store_df):
-        a_store_df = a_store_df.sort_values("visit_date")
-        return a_store_df.iloc[-1]
-    agg = hist_df.groupby('air_store_id').apply(func)
-    agg = agg.drop('air_store_id', errors='ignore',
-                   axis='columns').reset_index()
-    agg = agg[['air_store_id', 'rolling_60d_median']]
-    agg = agg.rename(
-        {
-            "rolling_60d_median": 'visitors',
-        }, axis="columns"
-    )
-    tes_like_trn = pd.merge(tes_like_trn, agg, how='left')
-    tes_like_trn.visitors = tes_like_trn.visitors.values + \
-        np.random.rand(tes_like_trn.visitors.values.shape[0])
-    return tes_like_trn
-
-
-def data2fea(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
-    " data cleansing and enrichment"
-    af_etl = run_para.get("af_etl", None)
-    use_cacheing = run_para.get("use_cacheing", None)
-    if not use_cacheing:
-        # load data from disk into memory
-        data = {
-            'tra': pd.read_csv('{}/air_visit_data.csv'.format(data_dir)),
-            # 'tes': pd.read_csv('{}/sample_submission.csv'.format(data_dir)),
-            'as': pd.read_csv('{}/air_store_info.csv'.format(data_dir)),
-            'hs': pd.read_csv('{}/hpg_store_info.csv'.format(data_dir)),
-            'ar': pd.read_csv('{}/air_reserve.csv'.format(data_dir)),
-            'hr': pd.read_csv('{}/hpg_reserve.csv'.format(data_dir)),
-            'id': pd.read_csv('{}/store_id_relation.csv'.format(data_dir)),
-            'hol': pd.read_csv('{}/date_info.csv'.format(data_dir)),
-            'ts_prep': pkl.load(open('{}/ts_prep.pkl'.format(data_dir), 'rb'))
-        }
-        if is_test:
-            # fill visits
-            src_df = add_default_2_tst(src_df, data['tra'])
-        tidy_df = add_rolling_stat(src_df)
-        tidy_df = add_area_loc_stat(tidy_df, data)
-        tidy_df = add_holiday_stat(tidy_df, data["hol"])
-        tidy_df = add_prop(tidy_df, data['ts_prep'])
-        static_attrs = ['air_store_id', 'air_loc',
-                        'hpb_loc', 'area_name', 'hpb_area_name']
-        tidy_df = add_attr_static(tidy_df, static_attrs)
-
-        # fill datetime splitted data
-        get_info_from_date(tidy_df, ['visit_date'])
-        # sort data according to their date
-        tidy_df = tidy_df.sort_values('visit_date')
-        tidy_df = tidy_df.assign(
-            visit_date_ts=tidy_df.visit_date.astype('int'))
-        mat = tidy_df.drop(['visit_date', 'Date'], axis=1)
-    else:
-        mat = pd.read_csv(use_cacheing)
-    if af_etl:
-        mat.to_csv(af_etl, index=False)
-    cat_vars, contin_vars = inspect_var_type(mat)
-    # fill NaN and drop useless columns
-    mat[cat_vars] = mat[cat_vars].fillna('UD')
-    mat[contin_vars] = mat[contin_vars].fillna(0)
-
-    if drop_vars:
-        mat = mat.drop(drop_vars, axis='columns', errors='ignore')
-        leave_date = list(set(drop_vars) - set(['Date']))
-        tidy_df = tidy_df.drop(leave_date, axis='columns', errors='ignore')
-        cat_vars = list(set(cat_vars) - set(drop_vars))
-        contin_vars = list(set(contin_vars) - set(drop_vars))
-
-    # reorder columns
-    mat = mat.reindex(sorted(mat.columns), axis=1)
-    cat_map, contin_map, cat_cols, contin_cols, cat_map_fit, y = mat2fea(
-        mat, cat_vars, contin_vars)
-
-    feas = {
-        'nn_fea': split_cols(cat_map) + [contin_map],
-        'sk_fea': np.concatenate([cat_map, contin_map], axis=1),
-        'y': y,
-        'contin_cols': contin_cols,
-        'cat_map_fit': cat_map_fit,
-        'tidy_data': tidy_df,
-        'all_vars': cat_vars + contin_vars,
-        'cat_vars': cat_vars
-    }
-    return feas
-
-
-def uniform(y_orig):
-    ' y uniform'
-    max_log_y = np.max(np.log1p(y_orig))
-    return np.log1p(y_orig) / max_log_y
-
-
-def mat2fea_v2(mat, cat_vars, contin_vars, precup_vars, contin_map_fit=None, cat_map_fit=None):
-    " from feature dataframe to matrix based on type"
-    mat[contin_vars] = mat[contin_vars].astype('float')
-    for v in contin_vars:
-        mat.loc[mat[v].isnull(), v] = 0
-    for v in precup_vars:
-        mat.loc[mat[v].isnull(), v] = 0
-    for v in cat_vars:
-        mat.loc[mat[v].isnull(), v] = ""
-
-    if cat_vars:
-        if not contin_map_fit:
-            cat_maps = [(o, LabelEncoder()) for o in cat_vars]
-            cat_mapper = DataFrameMapper(cat_maps)
-            cat_map_fit = cat_mapper.fit(mat)
-        cat_map = cat_map_fit.transform(mat).astype(np.int64)
-
-    if contin_vars:
-        if not contin_map_fit:
-            contin_maps = [([o], StandardScaler()) for o in contin_vars]
-            contin_mapper = DataFrameMapper(contin_maps)
-            contin_map_fit = contin_mapper.fit(mat)
-        contin_map = contin_map_fit.transform(mat).astype(np.float)
-
-    if precup_vars:
-        precup_map = mat[precup_vars].apply(uniform).fillna(0).values
-    return_vars = []
-    if cat_vars:
-        return_vars.append(cat_map)
-    if contin_vars:
-        return_vars.append(contin_map)
-    if precup_vars:
-        return_vars.append(precup_map)
-    return np.concatenate(return_vars, axis=1), mat.visitors.values, contin_map_fit, cat_map_fit
-
-
-def data2fea_v2(src_df, data_dir, run_para={}, is_test=False, drop_vars=None):
-    " data cleansing and enrichment"
-    af_etl = run_para.get("af_etl", None)
-    use_cacheing = run_para.get("use_cacheing", None)
-    if not use_cacheing:
-        # load data from disk into memory
-        data = {
-            'tra': pd.read_csv('{}/air_visit_data.csv'.format(data_dir)),
-            # 'tes': pd.read_csv('{}/sample_submission.csv'.format(data_dir)),
-            'as': pd.read_csv('{}/air_store_info.csv'.format(data_dir)),
-            'hs': pd.read_csv('{}/hpg_store_info.csv'.format(data_dir)),
-            'ar': pd.read_csv('{}/air_reserve.csv'.format(data_dir)),
-            'hr': pd.read_csv('{}/hpg_reserve.csv'.format(data_dir)),
-            'id': pd.read_csv('{}/store_id_relation.csv'.format(data_dir)),
-            'hol': pd.read_csv('{}/date_info.csv'.format(data_dir)),
-            'ts_prep': pkl.load(open('{}/ts_prep.pkl'.format(data_dir), 'rb'))
-        }
-        if is_test:
-            # fill visits
-            src_df = add_default_2_tst(src_df, data['tra'])
-        tidy_df = add_prop(src_df, data['ts_prep'])
-        # tidy_df = add_rolling_stat(tidy_df)
-        tidy_df = add_area_loc_stat(tidy_df, data)
-        # tidy_df = add_holiday_stat(tidy_df, data["hol"])
-        
-        static_attrs = ['air_store_id', 'air_loc',
-                        'hpb_loc', 'area_name', 'hpb_area_name']
-        tidy_df = add_attr_static(tidy_df, static_attrs)
-        # fill datetime splitted data
-        get_info_from_date(tidy_df, ['visit_date'])
-        # sort data according to their date
-    else:
-        mat = pd.read_csv(use_cacheing)
-    if af_etl:
-        mat.to_csv(af_etl, index=False)
-
-    if drop_vars:
-        leave_date = list(set(drop_vars) - set(['Date']))
-        tidy_df = tidy_df.drop(leave_date, axis='columns', errors='ignore')
-    # reorder columns
-    tidy_df = tidy_df.reindex(sorted(tidy_df.columns), axis=1)
-    feas = {
-        'tidy_data': tidy_df,
-    }
-    return feas
-
-
-def get_data(input_set, data_dir='./data',contin_map_fit=None, cat_map_fit=None):
-    ALL_VARS = ['visit_date_month',
-                'hpb_loc',
-                'hpb_genre_name',
-                'air_loc',
-                'genre_name',
-                'visit_date_week',
-                'area_name',
-                'air_store_id',
-                'visit_date_dayofweek',
-                'prop_yhat_lower',
-                'prop_seasonal_upper',
-                'max_visits_in_air_store_id',
-                'af_holiday_flg',
-                'prop_3_lower',
-                'prop_3_upper',
-                'prop_holidays_lower',
-                'prop_seasonal_lower',
-                'prop_weekly_upper',
-                'prop_1',
-                'prop_holidays_upper',
-                'prop_2_lower',
-                'min_visits_in_air_store_id',
-                'prop_2_upper',
-                'stores_in_area_name',
-                'prop_trend_lower',
-                'prop_3',
-                'max_visits_in_area_name',
-                'prop_6',
-                'rolling_60d_median',
-                'prop_yhat_upper',
-                'prop_1_upper',
-                'std_visits_in_air_store_id',
-                'prop_6_lower',
-                'prop_seasonalities_upper',
-                'rolling_60d_std',
-                'mean_visits_in_air_loc',
-                'be_holiday_flg',
-                'std_visits_in_air_loc',
-                'prop_6_upper',
-                'visit_date_ts',
-                'prop_weekly_lower',
-                'prop_trend',
-                'prop_yhat',
-                'rolling_60d_min',
-                'prop_weekly',
-                'prop_2',
-                'prop_seasonal',
-                'prop_seasonalities_lower',
-                'prop_seasonalities',
-                'rolling_60d_max',
-                'prop_1_lower',
-                'prop_trend_upper',
-                'prop_holidays',
-                'mean_visits_in_air_store_id',
-                'visit_date',
-                'visitors',
-                'hpb_area_name', 'stores_in_air_loc',
-                'stores_in_hpb_loc', 'stores_in_hpb_area_name', 'Date', 'holiday_flg',
-                'dur_time_holiday_flg', 'dur_holiday_flg', 'dur_prog_holiday_flg',
-                'prop_yhat',
-                'min_visits_in_air_loc', 'max_visits_in_air_loc',
-                'min_visits_in_hpb_loc', 'max_visits_in_hpb_loc',
-                'mean_visits_in_hpb_loc', 'std_visits_in_hpb_loc',
-                'min_visits_in_area_name',
-                'mean_visits_in_area_name',
-                'std_visits_in_area_name', 'min_visits_in_hpb_area_name',
-                'max_visits_in_hpb_area_name', 'mean_visits_in_hpb_area_name',
-                'std_visits_in_hpb_area_name', 'visit_date_year']
-    cat_vars = ['genre_name', 'air_store_id',
-                'hpb_genre_name', 'visit_date_year',
-                'area_name', 'air_loc',]
-    contin_vars = ['stores_in_hpb_loc',
-                   'stores_in_hpb_area_name',
-                   'stores_in_area_name',
-                   'stores_in_air_loc']
-    precup_vars = ["prop_yhat",
-                   "prop_yhat_lower",
-                   "prop_yhat_upper",
-                   "max_visits_in_air_store_id",
-                   "min_visits_in_air_store_id",
-                   "std_visits_in_air_store_id",
-                   ]
-
-    keep_vars = cat_vars + contin_vars + precup_vars + ['visitors']
-    drop_vars = list(set(ALL_VARS) - set(keep_vars))
-    feas = data2fea_v2(input_set, data_dir, drop_vars=drop_vars)
-    tidy_data = feas['tidy_data']
-    data_set = tidy_data[keep_vars]
-    X, Y, contin_map_fit, cat_map_fit = mat2fea_v2(
-        data_set, cat_vars, contin_vars, precup_vars, contin_map_fit, cat_map_fit)
-    Y = Y[:].reshape(-1, 1)
-    max_log_y = np.max(np.log1p(Y))
-    Y_org = Y
-    Y = uniform(Y_org)
-    all_vars = cat_vars + contin_vars + precup_vars
-    retuan_val = {
-        'X': X,
-        'Y': Y,
-        'Y_org': Y_org,
-        'max_log_y': max_log_y,
-        'gadge': tidy_data['prop_yhat'],
-        'contin_map_fit': contin_map_fit,
-        'cat_map_fit': cat_map_fit,
-        'all_vars': all_vars
-    }
-    return retuan_val
-
-
-def add_prop(trn, ts_feat):
-    ' add prophet features to train like dataframe'
-    for model_key in ts_feat.keys():
-        ts_feat[model_key] = ts_feat[model_key].assign(air_store_id=model_key)
-        ts_feat[model_key] = ts_feat[model_key].rename({
-            'ds': 'visit_date',
-        }, axis="columns")
-    concated = pd.concat([res for res in ts_feat.values()], axis=0)
-    concated.yhat = np.exp(concated.yhat.values)
-    concated.visit_date = concated.visit_date.astype('str')
-    name_dict = {col: 'prop_{}'.format(
-        col) for col in concated.columns if col != 'visit_date' and col != 'air_store_id'}
-    concated.rename(columns=dict(name_dict), inplace=True)
-    trn.visit_date = trn.visit_date.astype('str')
-    en_trn = pd.merge(trn, concated, on=['visit_date', 'air_store_id'], how='left')
-    return en_trn
+    return tidy_df, [], list(set(contins) - set(pre_vars))
