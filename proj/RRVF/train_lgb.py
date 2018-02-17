@@ -18,8 +18,8 @@ import pandas as pd
 import numpy as np
 import utils
 
-PATH = "../../../data/RRVF/"  # 'data/'
-RESULT = "../../../data/RRVF/" # "result/"
+PATH = 'data/'  # "../../../data/RRVF/"  # 'data/'
+RESULT = "result/" # "../../../data/RRVF/" # "result/"
 
 
 def load_splits():
@@ -34,6 +34,15 @@ def load_splits():
     X_test = splits['test']
     return X_train, y_train, X_valid, y_valid, X_test, cat_vars, contin_vars
 
+def generate_sub(csv_fn, m, df_test):
+    pred_test= m.predict(df_test)
+    pred_test = np.exp(pred_test)
+    test_set = df_test.copy()
+    test_set['visitors']=pred_test
+    trn_like_test = test_set.reset_index()[['air_store_id', 'visit_date', 'visitors']]
+    trn_like_test.visit_date = trn_like_test.visit_date.astype('str')
+    sub = utils.trn2test(trn_like_test)
+    sub.to_csv(csv_fn, index=False)
 
 def rmsle(x, y):
     # np.log(targ + 1) - np.log(y_pred + 1)
@@ -63,29 +72,28 @@ if __name__ == '__main__':
 
     # specify your configurations as a dict
     params = {
-        'task': 'train',
-        #     'boosting_type': 'dart',
+        'learning_rate': 0.02,
+        'boosting_type': 'gbdt',
         'objective': 'regression',
-        #     'metric': {'mse'},
-        'num_leaves': 80,
-        'learning_rate': 0.08,
-        'feature_fraction': 0.7,
-        'bagging_fraction': 0.8,
-        'bagging_freq': 5,
-        'verbose': 0,
-        'max_bin': 15,
-        'max_depth': 40
+        # 'metric': 'rmse',
+        'sub_feature': 0.7,
+        'num_leaves': 60,
+        'min_data': 100,
+        'min_hessian': 1,
+        # 'verbose': -1,
     }
     evals_result = {}
     gbm = lgb.train(params,
                     lgb_train,
-                    num_boost_round=3000,
+                    num_boost_round=500,
                     valid_sets=(lgb_train, lgb_eval),
                     feval=rmsle_wo_log,
                     evals_result=evals_result,
                     )  # early_stopping_rounds=0
 
     gbm.save_model('./result/gbm_model.txt')
+    csv_fn = 'lgb.csv'
+    generate_sub(csv_fn, gbm, X_test)
     print('Done')
 #     y_train_orig = train_set.visitors.values
 
