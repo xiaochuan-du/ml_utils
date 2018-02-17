@@ -235,6 +235,50 @@ class StoreDowTsFeas(luigi.Task):
         dataset.to_feather(self.output().path)
 
 
+class GenreDowTsFeas(luigi.Task):
+    """
+    This task runs over the target data returned by :py:meth:`~/.Streams.output` and
+    writes the result into its :py:meth:`~.AggregateArtists.output` target (local file).
+    """
+    period = luigi.Parameter()
+
+    def output(self):
+        """
+        Returns the target output for this task.
+        In this case, a successful execution of this task will create a file on the local filesystem.
+        :return: the target output for this task.
+        :rtype: object (:py:class:`luigi.target.Target`)
+        """
+        return luigi.LocalTarget('{}_{}_genre_dow'.format(RESULT, self.period))
+
+    def requires(self):
+        """
+        This task's dependencies:
+        * :py:class:`~.Streams`
+        :return: list of object (:py:class:`luigi.task.Task`)
+        """
+        return BasicFeas()
+
+    def run(self):
+        dataset = pd.read_feather(self.input().path)
+        contin_vars = pkl.load(open(f'{RESULT}basic_contin_vars.pkl', 'rb'))
+        cat_vars = pkl.load(open(f'{RESULT}basic_cat_vars.pkl', 'rb'))
+        
+        dataset, cats, contins = utils.add_rolling_stat(
+            dataset, self.period, ['genre_name', 'air_loc', 'visit_Dayofweek'])
+        cat_vars.extend(cats)
+        contin_vars.extend(contins)
+
+        dataset.visit_date = pd.to_datetime(dataset.visit_date)
+        dataset.visit_date = dataset.visit_date.dt.date
+
+        pkl.dump(contin_vars, open(
+            '{}_{}_genre_dow_contin_vars.pkl'.format(RESULT, self.period), 'wb'))
+        pkl.dump(cat_vars, open(
+            '{}_{}_genre_dow_cat_vars.pkl'.format(RESULT, self.period), 'wb'))
+        dataset.to_feather(self.output().path)
+
+
 class AggTsFeas(luigi.Task):
     """
     This task runs over the target data returned by :py:meth:`~/.AggregateArtists.output` or
@@ -249,8 +293,8 @@ class AggTsFeas(luigi.Task):
         * :py:class:`~.AggregateArtistsHadoop` if :py:attr:`~/.Top10Artists.use_hadoop` is set.
         :return: object (:py:class:`luigi.task.Task`)
         """
-        periods = ['30d', '60d', '90d', '180d', '360d']
-        return [StoreDowTsFeas(prd) for prd in periods] + [StoreTsFeas(prd) for prd in periods]
+        periods = ['30d', '60d', '90d', '180d', '360d', '720d']
+        return [StoreDowTsFeas(prd) for prd in periods] + [StoreTsFeas(prd) for prd in periods] + [GenreDowTsFeas(prd) for prd in periods]
 
     def output(self):
         """
@@ -278,13 +322,12 @@ class AggTsFeas(luigi.Task):
         contin_vars = reduce(lambda x, y: list(
             set(x) | set(y)), contins, contins[0])
         cat_vars = reduce(lambda x, y: list(set(x) | set(y)), cats, cats[0])
-        cols = [ list(df.columns) for df in dfs ]
+        cols = [list(df.columns) for df in dfs]
         base_cols = reduce(lambda x, y: list(
             set(x) & set(y)), cols, cols[0])
 
         dataset = pd.concat(
-            [ dfs[0][base_cols] ] + [df[list(set(df.columns) - set(base_cols))] for df in dfs]
-            , axis=1)
+            [dfs[0][base_cols]] + [df[list(set(df.columns) - set(base_cols))] for df in dfs], axis=1)
 
         pkl.dump(contin_vars, open(
             '{}_agg_feas_contin_vars.pkl'.format(RESULT), 'wb'))
@@ -338,8 +381,9 @@ def apply_cats(df, trn):
     now the type of col is category {a : 1, b : 2}
     """
     for n, c in df.items():
-        if (n in trn.columns) and (trn[n].dtype.name=='category'):
-            df[n] = pd.Categorical(c, categories=trn[n].cat.categories, ordered=True)
+        if (n in trn.columns) and (trn[n].dtype.name == 'category'):
+            df[n] = pd.Categorical(
+                c, categories=trn[n].cat.categories, ordered=True)
 
 
 def dataset_split(data_raw):
@@ -347,19 +391,21 @@ def dataset_split(data_raw):
     def split(df):
         trn_len = int(np.floor(len(df) * 0.9))
         valid_len = len(df) - trn_len
-        df['type'] = 0  #0 for train 1 for valid
+        df['type'] = 0  # 0 for train 1 for valid
         indexs = df.index
         df = df.reset_index()
-        df.loc[trn_len:, 'type'] =  1
+        df.loc[trn_len:, 'type'] = 1
         return df
-    
+
     test = pd.read_csv('{}sample_submission.csv'.format(PATH))
     test_data = utils.tes2trn(test)
     test_stores = test_data.air_store_id.unique()
     data_raw.visit_date = data_raw.visit_date.astype('str')
     test_data.visit_date = test_data.visit_date.astype('str')
-    test_set = data_raw[data_raw.visit_date.isin(test_data.visit_date.unique())]
-    data_raw = data_raw[~data_raw.visit_date.isin(test_data.visit_date.unique())]
+    test_set = data_raw[data_raw.visit_date.isin(
+        test_data.visit_date.unique())]
+    data_raw = data_raw[~data_raw.visit_date.isin(
+        test_data.visit_date.unique())]
     data = data_raw[data_raw.air_store_id.isin(test_stores)]
     tag_data = data.groupby('air_store_id').apply(split)
     t = tag_data.set_index('index')
@@ -368,6 +414,7 @@ def dataset_split(data_raw):
     train_set = train_set.reset_index().drop(['index', 'type'], axis=1)
     valid_set = valid_set.reset_index().drop(['index', 'type'], axis=1)
     return train_set, valid_set, test_set
+
 
 class DataSplits(luigi.Task):
     """
@@ -394,21 +441,23 @@ class DataSplits(luigi.Task):
         """
         return luigi.LocalTarget('{}_datasplits.pkl'.format(RESULT))
 
-
-
     def run(self):
         dataset = pd.read_feather(self.input().path)
-        contin_vars = pkl.load(open(f'{RESULT}_agg_feas_contin_vars.pkl', 'rb'))
+        contin_vars = pkl.load(
+            open(f'{RESULT}_agg_feas_contin_vars.pkl', 'rb'))
         cat_vars = pkl.load(open(f'{RESULT}_agg_feas_cat_vars.pkl', 'rb'))
 
         train_set, valid_set, test_set = dataset_split(dataset)
         dep = 'visitors'
 
         n = len(train_set)
-        train_set = train_set[cat_vars+contin_vars+[dep, 'visit_date']].copy()
-        valid_set = valid_set[cat_vars+contin_vars+[dep, 'visit_date']].copy()
-        test_set = test_set[cat_vars+contin_vars+[dep, 'visit_date']].copy()
-        for v in cat_vars: 
+        train_set = train_set[cat_vars +
+                              contin_vars + [dep, 'visit_date']].copy()
+        valid_set = valid_set[cat_vars +
+                              contin_vars + [dep, 'visit_date']].copy()
+        test_set = test_set[cat_vars +
+                            contin_vars + [dep, 'visit_date']].copy()
+        for v in cat_vars:
             train_set[v] = train_set[v].astype('category').cat.as_ordered()
         apply_cats(test_set, train_set)
         apply_cats(valid_set, train_set)
@@ -419,11 +468,11 @@ class DataSplits(luigi.Task):
 
         df, y, nas, mapper = proc_df(train_set, 'visitors', do_scale=True)
         yl = np.log1p(y)
-        df_val, y_val, _, _ = proc_df(valid_set, 'visitors', do_scale=True, #  skip_flds=['Id'],
-                                        mapper=mapper, na_dict=nas)
+        df_val, y_val, _, _ = proc_df(valid_set, 'visitors', do_scale=True,  # skip_flds=['Id'],
+                                      mapper=mapper, na_dict=nas)
         y2 = np.log1p(y_val)
-        df_test, _, _, _ = proc_df(test_set, 'visitors', do_scale=True, # skip_flds=['Id'],
-                                        mapper=mapper, na_dict=nas)
+        df_test, _, _, _ = proc_df(test_set, 'visitors', do_scale=True,  # skip_flds=['Id'],
+                                   mapper=mapper, na_dict=nas)
         output_dict = {
             'contin_vars': contin_vars,
             'cat_vars': cat_vars,
@@ -435,6 +484,7 @@ class DataSplits(luigi.Task):
         }
         pkl.dump(output_dict, open(
             '{}_datasplits.pkl'.format(RESULT), 'wb'))
+
 
 if __name__ == "__main__":
     luigi.run()
