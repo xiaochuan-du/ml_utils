@@ -35,14 +35,16 @@ def load_splits():
     return X_train, y_train, X_valid, y_valid, X_test, cat_vars, contin_vars
 
 def generate_sub(csv_fn, m, df_test):
+    test_set = pd.read_csv('{}sample_submission.csv'.format(PATH))
+    # print(test.head())
     pred_test= m.predict(df_test)
     pred_test = np.exp(pred_test)
-    test_set = df_test.copy()
+    # test_set = df_test.copy()
     test_set['visitors']=pred_test
-    trn_like_test = test_set.reset_index()[['air_store_id', 'visit_date', 'visitors']]
-    trn_like_test.visit_date = trn_like_test.visit_date.astype('str')
-    sub = utils.trn2test(trn_like_test)
-    sub.to_csv(csv_fn, index=False)
+    # trn_like_test = test_set.reset_index()[['air_store_id', 'visit_date', 'visitors']]
+    # trn_like_test.visit_date = trn_like_test.visit_date.astype('str')
+    # sub = utils.trn2test(trn_like_test)
+    test_set.to_csv(csv_fn, index=False)
 
 def rmsle(x, y):
     # np.log(targ + 1) - np.log(y_pred + 1)
@@ -63,7 +65,9 @@ def rmsle_wo_log(y_predicted, y_true):
 
 if __name__ == '__main__':
     X_train, y_train, X_valid, y_valid, X_test, cat_vars, contin_vars = load_splits()
-    print('Trn size {}, Val size {}'.format(len(X_valid), len(y_valid)))
+    X_train = pd.concat((X_train.copy(), X_valid.copy()))
+    y_train = np.concatenate((y_train, y_valid)) 
+    print('Trn size {}, Val size {}'.format(len(y_train), len(y_valid)))
     print('Trn store # {}, Val store # {}'.format(
         len(X_train.air_store_id.unique()), len(X_valid.air_store_id.unique())))
     lgb_train = lgb.Dataset(X_train, y_train.ravel(), free_raw_data=False)
@@ -85,7 +89,7 @@ if __name__ == '__main__':
     evals_result = {}
     gbm = lgb.train(params,
                     lgb_train,
-                    num_boost_round=500,
+                    num_boost_round=1300,
                     valid_sets=(lgb_train, lgb_eval),
                     feval=rmsle_wo_log,
                     evals_result=evals_result,
