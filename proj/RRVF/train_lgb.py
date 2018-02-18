@@ -38,7 +38,7 @@ def generate_sub(csv_fn, m, df_test):
     test_set = pd.read_csv('{}sample_submission.csv'.format(PATH))
     # print(test.head())
     pred_test= m.predict(df_test)
-    pred_test = np.exp(pred_test)
+    pred_test = np.expm1(pred_test)
     # test_set = df_test.copy()
     test_set['visitors']=pred_test
     # trn_like_test = test_set.reset_index()[['air_store_id', 'visit_date', 'visitors']]
@@ -81,7 +81,7 @@ if __name__ == '__main__':
         'objective': 'regression',
         # 'metric': 'rmse',
         'sub_feature': 0.7,
-        'num_leaves': 60,
+        'num_leaves': 80,
         'min_data': 100,
         'min_hessian': 1,
         # 'verbose': -1,
@@ -89,14 +89,14 @@ if __name__ == '__main__':
     evals_result = {}
     gbm = lgb.train(params,
                     lgb_train,
-                    num_boost_round=1300,
+                    num_boost_round=1000,
                     valid_sets=(lgb_train, lgb_eval),
                     feval=rmsle_wo_log,
                     evals_result=evals_result,
                     )  # early_stopping_rounds=0
 
-    gbm.save_model('./result/gbm_model.txt')
-    csv_fn = 'lgb.csv'
+    gbm.save_model('./result/gbm_model_num.txt')
+    csv_fn = 'lgb_fix_num.csv'
     generate_sub(csv_fn, gbm, X_test)
     print('Done')
 #     y_train_orig = train_set.visitors.values
