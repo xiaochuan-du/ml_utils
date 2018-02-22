@@ -293,7 +293,7 @@ class AggTsFeas(luigi.Task):
         * :py:class:`~.AggregateArtistsHadoop` if :py:attr:`~/.Top10Artists.use_hadoop` is set.
         :return: object (:py:class:`luigi.task.Task`)
         """
-        periods = ['30d', '60d', '90d', '180d', '360d', '720d']
+        periods = ['7d', '10d', '14d', '21d', '30d', '60d', '90d', '180d', '360d', '720d']
         return [StoreDowTsFeas(prd) for prd in periods] + [StoreTsFeas(prd) for prd in periods] + [GenreDowTsFeas(prd) for prd in periods]
 
     def output(self):
@@ -465,7 +465,12 @@ class DataSplits(luigi.Task):
         valid_set = valid_set.set_index("visit_date")
         train_set = train_set.set_index("visit_date")
         test_set = test_set.set_index("visit_date")
-
+        to_drop = ['rolling_air_store_id_visit_Dayofweek_14d_skew' ,'rolling_air_store_id_visit_Dayofweek_7d_skew', 'rolling_air_store_id_visit_Dayofweek_10d_skew', 'rolling_genre_name_air_loc_visit_Dayofweek_7d_std', 'rolling_genre_name_air_loc_visit_Dayofweek_10d_skew', 'rolling_air_store_id_visit_Dayofweek_7d_std', 'rolling_genre_name_air_loc_visit_Dayofweek_7d_skew', 'rolling_genre_name_air_loc_visit_Dayofweek_14d_skew']
+        train_set.drop(to_drop, axis=1, inplace=True, errors='ignore')
+        valid_set.drop(to_drop, axis=1, inplace=True, errors='ignore')
+        test_set.drop(to_drop, axis=1, inplace=True, errors='ignore')
+        contin_vars = list(set(contin_vars) - set(to_drop))
+        cat_vars = list(set(cat_vars) - set(to_drop))
         df, y, nas, mapper = proc_df(train_set, 'visitors', do_scale=True)
         yl = np.log1p(y)
         df_val, y_val, _, _ = proc_df(valid_set, 'visitors', do_scale=True,  # skip_flds=['Id'],
