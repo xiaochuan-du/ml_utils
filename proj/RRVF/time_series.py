@@ -342,7 +342,7 @@ def get_genre_week_exp_feat(label, key, n_day, data_dict):
     return result
 
 
-def get_first_last_time(label, key, n_day, data_dict):
+def get_first_last_time_feat(label, key, n_day, data_dict):
     data = data_dict['data']
     start_date = date_add_days(key[0], -n_day)
     data_temp = data[(data.visit_date < key[0]) & (
@@ -355,8 +355,7 @@ def get_first_last_time(label, key, n_day, data_dict):
 
 # air_reserve
 
-
-def get_reserve_feat(label, key, data_dict):
+def get_reserve_feat(label, key, _, data_dict):
     data = data_dict['data']
     air_reserve = data_dict['air_reserve']
     hpg_reserve = data_dict['hpg_reserve']
@@ -463,7 +462,7 @@ if __name__ == '__main__':
         lambda label, key, data_dict: get_genre_week_feat(label, key, 28, data_dict),
         lambda label, key, data_dict: get_reserve_feat(label, key, data_dict),
         lambda label, key, data_dict: get_genre_week_exp_feat(label, key, 1000, data_dict),
-        lambda label, key, data_dict: get_first_last_time(label, key, 1000, data_dict)
+        lambda label, key, data_dict: get_first_last_time_feat(label, key, 1000, data_dict)
     ]
     pivot_date='2016-03-12'
     end_date='2016-04-22'
