@@ -29,6 +29,17 @@ def plot_seasonality(df, ds_col='ds', y_col='y', figsize=(20, 10)):
     '5': 'Sat',
     '6': 'Sun'
   }
+  
+  colors = {
+    '0': 'b',
+    '1': 'g',
+    '2': 'k',
+    '3': 'c',
+    '4': 'y',
+    '5': 'm',
+    '6': 'r'  
+  }
+    
   data['dow_label'] = data.dow.apply(lambda x : dow_label[str(x)])
   
   #plot
@@ -36,5 +47,5 @@ def plot_seasonality(df, ds_col='ds', y_col='y', figsize=(20, 10)):
   subplots = []
   for i in range(7):
     data_sub = data[data.dow == i]
-    subplots.append(plt.plot(data_sub.ds, data_sub.y, 'o')[0])
+    subplots.append(plt.plot(data_sub.ds, data_sub.y, 'o'+colors[str(i)])[0])
   plt.figlegend(tuple(subplots), tuple(dow_label.values()), 'center right')
