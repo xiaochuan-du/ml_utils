@@ -108,3 +108,4 @@ ENV/
 # 
 proj/RRVF/images/*
 *.pkl
+*.kaggle-cli*
