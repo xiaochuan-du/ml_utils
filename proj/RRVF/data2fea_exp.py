@@ -21,39 +21,33 @@
 # cat_vars.extend(cats)
 # contin_vars.extend(contins)
 
-import re
-import random
-from functools import reduce
+import functools
+import math
 import pickle as pkl
+import random
+import re
+import time
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, wait
+from datetime import date, timedelta
+from functools import reduce
 from heapq import nlargest
 
-from luigi import six
+import numpy as np
+import pandas as pd
+from dateutil.parser import parse
+from sklearn.preprocessing import LabelEncoder
 
+import arrow
 import luigi
 import luigi.contrib.hadoop
 import luigi.contrib.hdfs
 import luigi.contrib.postgres
+import utils
+from time_series import *
+from timeseries_fm import *
 from utils import proc_df as proc_df
 
-import pandas as pd
-import numpy as np
-import utils
-
-
-import time
-import numpy as np
-import pandas as pd
-from dateutil.parser import parse
-from datetime import date, timedelta
-from sklearn.preprocessing import LabelEncoder
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, wait
-import functools
-
-import arrow
-import math
-from timeseries_fm import *
-from time_series import *
 PATH = 'data/' # "../../../data/RRVF/"
 RESULT = "result/"
 
@@ -148,8 +142,8 @@ class LabelSet(luigi.Task):
     """
     label set
     """
-    end_date = luigi.Parameter() # static end_date
-    ndays = luigi.Parameter() # number of days in labelling set
+    end_date = luigi.Parameter()  # static end_date
+    ndays = luigi.Parameter()  # number of days in labelling set
 
     def output(self):
         """
@@ -171,6 +165,7 @@ class LabelSet(luigi.Task):
         label = get_label(self.end_date, self.ndays, data_dict)
         label.to_feather(self.output().path)
 
+
 class BaseProc(luigi.Task):
     """
     label set
@@ -191,7 +186,6 @@ class BaseProc(luigi.Task):
         """
         Returns the target output for this task.
         """
-        
         return luigi.LocalTarget(
             '{}{}_{}_{}'.format(RESULT, self.get_uri(), self.end_date, self.ndays))
 
@@ -211,59 +205,83 @@ class BaseProc(luigi.Task):
         feas = func(label, key, self.stat_ndays, data_dict)
         feas.to_feather(self.output().path)
 
+
 class StoreVisitor(BaseProc):
     " one feature engineer processor"
     pass
+
+
 class StoreExpVisitor(BaseProc):
     " one feature engineer processor"
     pass
+
+
 class StoreWeek(BaseProc):
     " one feature engineer processor"
     pass
+
+
 class StoreWeekDiff(BaseProc):
     " one feature engineer processor"
     pass
+
+
 class StoreAllWeek(BaseProc):
     " one feature engineer processor"
     pass
+
+
 class StoreWeekExp(BaseProc):
     " one feature engineer processor"
     pass
+
+
 class StoreHoliday(BaseProc):
     " one feature engineer processor"
     pass
+
+
 class GenreVisitor(BaseProc):
     " one feature engineer processor"
     pass
+
+
 class GenreExpVisitor(BaseProc):
     " one feature engineer processor"
     pass
+
+
 class GenreWeek(BaseProc):
     " one feature engineer processor"
     pass
+
+
 class GenreWeekExp(BaseProc):
     " one feature engineer processor"
     pass
+
+
 class FirstLastTime(BaseProc):
     " one feature engineer processor"
     pass
+
+
 class Reserve(BaseProc):
     " one feature engineer processor"
     pass
+
 
 class Period(luigi.Task):
     """
     This task runs over the target data returned by :py:meth:`~/.Streams.output` and
     writes the result into its :py:meth:`~.AggregateArtists.output` target (local file).
     """
-    end_date = luigi.Parameter() # static end_date
-    ndays = luigi.Parameter() # number of days in labelling set
+    end_date = luigi.Parameter()  # static end_date
+    ndays = luigi.Parameter()  # number of days in labelling set
+
     def output(self):
         """
         Returns the target output for this task.
-        In this case, a successful execution of this task will create a file on the local filesystem.
-        :return: the target output for this task.
-        :rtype: object (:py:class:`luigi.target.Target`)
         """
         return luigi.LocalTarget('{}period'.format(RESULT))
 
@@ -313,13 +331,14 @@ class Period(luigi.Task):
         # pkl.dump(cat_vars, open(f'{RESULT}basic_cat_vars.pkl', 'wb'))
 
 
-class StoreTsFeas(luigi.Task):
+class AggTsFeas(luigi.Task):
     """
     This task runs over the target data returned by :py:meth:`~/.Streams.output` and
     writes the result into its :py:meth:`~.AggregateArtists.output` target (local file).
     """
-    pivot_date = luigi.Parameter() # edge point between adjustive win and fixed win end_date
-    end_date = luigi.Parameter() # end of label set
+    pivot_date = luigi.Parameter()  # edge point between adjustive win and fixed win end_date
+    end_date = luigi.Parameter()  # end of label set
+    start_date = luigi.Parameter()  # start of stat set
     date_col = luigi.Parameter()
     date_step = luigi.Parameter()
     days_in_label = luigi.Parameter()
@@ -332,7 +351,8 @@ class StoreTsFeas(luigi.Task):
         :return: the target output for this task.
         :rtype: object (:py:class:`luigi.target.Target`)
         """
-        return luigi.LocalTarget('{}_{}_store'.format(RESULT, self.period))
+        return luigi.LocalTarget(
+            '{}_{}_agg_ts_feas'.format(RESULT, self.period))
 
     def requires(self):
         """
@@ -340,223 +360,49 @@ class StoreTsFeas(luigi.Task):
         * :py:class:`~.Streams`
         :return: list of object (:py:class:`luigi.task.Task`)
         """
-        return BasicFeas()
+        windows = []
+        max_date = arrow.get(self.pivot_date)
+        min_date = arrow.get(self.start_date)
+        delta = (max_date - min_date).days - self.min_num_in_stat_set
+        nwindows_bf_pivot = int((delta) / self.date_step)
+        nwindows_af_pivot = math.floor(
+            (arrow.get(self.end_date) - arrow.get(self.pivot_date)).days / self.date_step)
+
+        start_date = min_date.shift(days=self.min_num_in_stat_set)
+        for day_delta in range(nwindows_bf_pivot):
+            # >= start & < end
+            windows.append(
+                {
+                    "pivot_date": start_date.format('YYYY-MM-DD'),
+                    "days_in_label": self.days_in_label
+                }
+            )
+            start_date = start_date.shift(days=self.date_step)
+        start_date = max_date.shift(days=self.date_step)
+        ndays_unit_af_pivot = self.days_in_label - self.days_in_label % self.date_step
+        for day_delta in range(nwindows_af_pivot):
+            adaptive_len = ndays_unit_af_pivot - (day_delta * self.date_step)
+            windows.append(
+                {
+                    "pivot_date": start_date.format('YYYY-MM-DD'),
+                    "days_in_label": adaptive_len
+                }
+            )
+            start_date = start_date.shift(days=self.date_step)
+        print('nwindows_bf_pivot:{}, nwindows_af_pivot {}'
+              .format(nwindows_bf_pivot, nwindows_af_pivot))
+        print('First window {}'.format(windows[0]))
+        print('Last window {}'.format(windows[-1]))
+        return [
+            Period(win['pivot_date'], win['days_in_label']) for win in windows]
 
     def run(self):
-        data = pkl.load(open(self.input().path, 'rb'))
-
-        dataset = pd.read_feather(self.input().path)
-        contin_vars = pkl.load(open(f'{RESULT}basic_contin_vars.pkl', 'rb'))
-        cat_vars = pkl.load(open(f'{RESULT}basic_cat_vars.pkl', 'rb'))
-
-        dataset, cats, contins = utils.add_rolling_stat(
-            dataset, self.period, ['air_store_id'])
-        cat_vars.extend(cats)
-        contin_vars.extend(contins)
-
-        dataset.visit_date = pd.to_datetime(dataset.visit_date)
-        dataset.visit_date = dataset.visit_date.dt.date
-
-        pkl.dump(contin_vars, open(
-            '{}_{}_store_contin_vars.pkl'.format(RESULT, self.period), 'wb'))
-        pkl.dump(cat_vars, open(
-            '{}_{}_store_cat_vars.pkl'.format(RESULT, self.period), 'wb'))
+        feats = [
+            pd.read_feather(input_line.path)
+            for input_line in self.input()
+        ]
+        dataset = pd.concat(feats)
         dataset.to_feather(self.output().path)
-
-
-class StoreDowTsFeas(luigi.Task):
-    """
-    This task runs over the target data returned by :py:meth:`~/.Streams.output` and
-    writes the result into its :py:meth:`~.AggregateArtists.output` target (local file).
-    """
-    period = luigi.Parameter()
-
-    def output(self):
-        """
-        Returns the target output for this task.
-        In this case, a successful execution of this task will create a file on the local filesystem.
-        :return: the target output for this task.
-        :rtype: object (:py:class:`luigi.target.Target`)
-        """
-        return luigi.LocalTarget('{}_{}_store_dow'.format(RESULT, self.period))
-
-    def requires(self):
-        """
-        This task's dependencies:
-        * :py:class:`~.Streams`
-        :return: list of object (:py:class:`luigi.task.Task`)
-        """
-        return BasicFeas()
-
-    def run(self):
-        dataset = pd.read_feather(self.input().path)
-        contin_vars = pkl.load(open(f'{RESULT}basic_contin_vars.pkl', 'rb'))
-        cat_vars = pkl.load(open(f'{RESULT}basic_cat_vars.pkl', 'rb'))
-
-        dataset, cats, contins = utils.add_rolling_stat(
-            dataset, self.period, ['air_store_id', 'visit_Dayofweek'])
-        cat_vars.extend(cats)
-        contin_vars.extend(contins)
-
-        dataset.visit_date = pd.to_datetime(dataset.visit_date)
-        dataset.visit_date = dataset.visit_date.dt.date
-
-        pkl.dump(contin_vars, open(
-            '{}_{}_store_dow_contin_vars.pkl'.format(RESULT, self.period), 'wb'))
-        pkl.dump(cat_vars, open(
-            '{}_{}_store_dow_cat_vars.pkl'.format(RESULT, self.period), 'wb'))
-        dataset.to_feather(self.output().path)
-
-
-class GenreDowTsFeas(luigi.Task):
-    """
-    This task runs over the target data returned by :py:meth:`~/.Streams.output` and
-    writes the result into its :py:meth:`~.AggregateArtists.output` target (local file).
-    """
-    period = luigi.Parameter()
-
-    def output(self):
-        """
-        Returns the target output for this task.
-        In this case, a successful execution of this task will create a file on the local filesystem.
-        :return: the target output for this task.
-        :rtype: object (:py:class:`luigi.target.Target`)
-        """
-        return luigi.LocalTarget('{}_{}_genre_dow'.format(RESULT, self.period))
-
-    def requires(self):
-        """
-        This task's dependencies:
-        * :py:class:`~.Streams`
-        :return: list of object (:py:class:`luigi.task.Task`)
-        """
-        return BasicFeas()
-
-    def run(self):
-        dataset = pd.read_feather(self.input().path)
-        contin_vars = pkl.load(open(f'{RESULT}basic_contin_vars.pkl', 'rb'))
-        cat_vars = pkl.load(open(f'{RESULT}basic_cat_vars.pkl', 'rb'))
-        
-        dataset, cats, contins = utils.add_rolling_stat(
-            dataset, self.period, ['genre_name', 'air_loc', 'visit_Dayofweek'])
-        cat_vars.extend(cats)
-        contin_vars.extend(contins)
-
-        dataset.visit_date = pd.to_datetime(dataset.visit_date)
-        dataset.visit_date = dataset.visit_date.dt.date
-
-        pkl.dump(contin_vars, open(
-            '{}_{}_genre_dow_contin_vars.pkl'.format(RESULT, self.period), 'wb'))
-        pkl.dump(cat_vars, open(
-            '{}_{}_genre_dow_cat_vars.pkl'.format(RESULT, self.period), 'wb'))
-        dataset.to_feather(self.output().path)
-
-
-class AggTsFeas(luigi.Task):
-    """
-    This task runs over the target data returned by :py:meth:`~/.AggregateArtists.output` or
-    :py:meth:`~/.AggregateArtistsHadoop.output` in case :py:attr:`~/.Top10Artists.use_hadoop` is set and
-    writes the result into its :py:meth:`~.Top10Artists.output` target (a file in local filesystem).
-    """
-
-    def requires(self):
-        """
-        This task's dependencies:
-        * :py:class:`~.AggregateArtists` or
-        * :py:class:`~.AggregateArtistsHadoop` if :py:attr:`~/.Top10Artists.use_hadoop` is set.
-        :return: object (:py:class:`luigi.task.Task`)
-        """
-        periods = ['7d', '10d', '14d', '21d', '30d', '60d', '90d', '180d', '360d', '720d']
-        return [StoreDowTsFeas(prd) for prd in periods] + [StoreTsFeas(prd) for prd in periods] + [GenreDowTsFeas(prd) for prd in periods]
-
-    def output(self):
-        """
-        Returns the target output for this task.
-        In this case, a successful execution of this task will create a file on the local filesystem.
-        :return: the target output for this task.
-        :rtype: object (:py:class:`luigi.target.Target`)
-        """
-        return luigi.LocalTarget('{}agg_feas'.format(RESULT))
-
-    def run(self):
-        dfs = []
-        contins = []
-        cats = []
-        for input_file in self.input():
-            data_file = input_file.path
-            dataset = pd.read_feather(data_file)
-            contin_vars = pkl.load(
-                open('{}_contin_vars.pkl'.format(data_file), 'rb'))
-            cat_vars = pkl.load(
-                open('{}_cat_vars.pkl'.format(data_file), 'rb'))
-            dfs.append(dataset)
-            contins.append(contin_vars)
-            cats.append(cat_vars)
-        contin_vars = reduce(lambda x, y: list(
-            set(x) | set(y)), contins, contins[0])
-        cat_vars = reduce(lambda x, y: list(set(x) | set(y)), cats, cats[0])
-        cols = [list(df.columns) for df in dfs]
-        base_cols = reduce(lambda x, y: list(
-            set(x) & set(y)), cols, cols[0])
-
-        dataset = pd.concat(
-            [dfs[0][base_cols]] + [df[list(set(df.columns) - set(base_cols))] for df in dfs], axis=1)
-
-        pkl.dump(contin_vars, open(
-            '{}_agg_feas_contin_vars.pkl'.format(RESULT), 'wb'))
-        pkl.dump(cat_vars, open(
-            '{}_agg_feas_cat_vars.pkl'.format(RESULT), 'wb'))
-        dataset.to_feather(self.output().path)
-
-
-def apply_cats(df, trn):
-    """Changes any columns of strings in df into categorical variables using trn as
-    a template for the category codes.
-
-    Parameters:
-    -----------
-    df: A pandas dataframe. Any columns of strings will be changed to
-        categorical values. The category codes are determined by trn.
-
-    trn: A pandas dataframe. When creating a category for df, it looks up the
-        what the category's code were in trn and makes those the category codes
-        for df.
-
-    Examples:
-    ---------
-    >>> df = pd.DataFrame({'col1' : [1, 2, 3], 'col2' : ['a', 'b', 'a']})
-    >>> df
-       col1 col2
-    0     1    a
-    1     2    b
-    2     3    a
-
-    note the type of col2 is string
-
-    >>> train_cats(df)
-    >>> df
-
-       col1 col2
-    0     1    a
-    1     2    b
-    2     3    a
-
-    now the type of col2 is category {a : 1, b : 2}
-
-    >>> df2 = pd.DataFrame({'col1' : [1, 2, 3], 'col2' : ['b', 'a', 'a']})
-    >>> apply_cats(df2, df)
-
-           col1 col2
-        0     1    b
-        1     2    a
-        2     3    a
-
-    now the type of col is category {a : 1, b : 2}
-    """
-    for n, c in df.items():
-        if (n in trn.columns) and (trn[n].dtype.name == 'category'):
-            df[n] = pd.Categorical(
-                c, categories=trn[n].cat.categories, ordered=True)
 
 
 def dataset_split(data_raw):
