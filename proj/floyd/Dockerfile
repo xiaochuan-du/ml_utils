@@ -4,6 +4,7 @@ COPY floyd_requirements.txt floyd_requirements.txt
 RUN ["pip3","--default-timeout=300 ", "install","-r","floyd_requirements.txt","-i","https://pypi.tuna.tsinghua.edu.cn/simple"]
 COPY fastai fastai
 RUN cd fastai && python3 setup.py install
+RUN python3 -m spacy download en
 LABEL version="1.0" description="This image is used to set up fastai dev env."
 
 
