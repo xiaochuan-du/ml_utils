@@ -143,7 +143,7 @@ class LabelSet(luigi.Task):
     label set
     """
     end_date = luigi.Parameter()  # static end_date
-    ndays = luigi.Parameter()  # number of days in labelling set
+    ndays = luigi.IntParameter()  # number of days in labelling set
 
     def output(self):
         """
@@ -161,8 +161,8 @@ class LabelSet(luigi.Task):
         return Dataset()
 
     def run(self):
-        data_dict = pd.read_feather(self.input().path)
-        label = get_label(self.end_date, self.ndays, data_dict)
+        data_dict = pkl.load(open(self.input().path, 'rb'))
+        label = get_label(self.end_date, int(self.ndays), data_dict)
         label.to_feather(self.output().path)
 
 
@@ -171,13 +171,13 @@ class BaseProc(luigi.Task):
     label set
     """
     end_date = luigi.Parameter() # static end_date
-    ndays = luigi.Parameter() # number of days in labelling set
+    ndays = luigi.IntParameter() # number of days in labelling set
     stat_ndays = luigi.Parameter()
 
     def get_uri(self):
         class_name = str(self.__class__).split('.')[-1][:-2]
         tmp_str = class_name
-        for char in re.findall('[A-Z]', a):
+        for char in re.findall('[A-Z]', class_name):
             tmp_str = tmp_str.replace(char, '_'+ char.lower())
         class_name = tmp_str.strip('_')
         return class_name
@@ -187,7 +187,7 @@ class BaseProc(luigi.Task):
         Returns the target output for this task.
         """
         return luigi.LocalTarget(
-            '{}{}_{}_{}'.format(RESULT, self.get_uri(), self.end_date, self.ndays))
+            '{}{}_c{}_e{}_n=s{}'.format(RESULT, self.get_uri(), self.end_date, self.ndays, self.stat_ndays))
 
     def requires(self):
         """
@@ -200,9 +200,9 @@ class BaseProc(luigi.Task):
     def run(self):
         data_dict = pkl.load(open(self.input()[0].path, 'rb'))
         label = pd.read_feather(self.input()[1].path)
-        key = self.end_date, self.ndays
+        key = self.end_date, int(self.ndays)
         func = eval('get_{}_feat'.format(self.get_uri()))
-        feas = func(label, key, self.stat_ndays, data_dict)
+        feas = func(label, key, int(self.stat_ndays), data_dict)
         feas.to_feather(self.output().path)
 
 
@@ -283,7 +283,7 @@ class Period(luigi.Task):
         """
         Returns the target output for this task.
         """
-        return luigi.LocalTarget('{}period'.format(RESULT))
+        return luigi.LocalTarget('{}period_e{}_n{}'.format(RESULT, self.end_date, self.ndays))
 
     def requires(self):
         """
@@ -339,7 +339,7 @@ class AggTsFeas(luigi.Task):
     pivot_date = luigi.Parameter()  # edge point between adjustive win and fixed win end_date
     end_date = luigi.Parameter()  # end of label set
     start_date = luigi.Parameter()  # start of stat set
-    date_col = luigi.Parameter()
+    # date_col = luigi.Parameter()
     date_step = luigi.Parameter()
     days_in_label = luigi.Parameter()
     min_num_in_stat_set = luigi.Parameter()
@@ -352,7 +352,7 @@ class AggTsFeas(luigi.Task):
         :rtype: object (:py:class:`luigi.target.Target`)
         """
         return luigi.LocalTarget(
-            '{}_{}_agg_ts_feas'.format(RESULT, self.period))
+            '{}agg_ts_feas_p{}_e{}_s{}'.format(RESULT, self.pivot_date, self.end_date, self.start_date))
 
     def requires(self):
         """
@@ -360,35 +360,38 @@ class AggTsFeas(luigi.Task):
         * :py:class:`~.Streams`
         :return: list of object (:py:class:`luigi.task.Task`)
         """
+        date_step = int(self.date_step)
+        days_in_label = int(self.days_in_label)
+        min_num_in_stat_set = int(self.min_num_in_stat_set)
         windows = []
         max_date = arrow.get(self.pivot_date)
         min_date = arrow.get(self.start_date)
-        delta = (max_date - min_date).days - self.min_num_in_stat_set
-        nwindows_bf_pivot = int((delta) / self.date_step)
+        delta = (max_date - min_date).days - min_num_in_stat_set
+        nwindows_bf_pivot = int((delta) / date_step)
         nwindows_af_pivot = math.floor(
-            (arrow.get(self.end_date) - arrow.get(self.pivot_date)).days / self.date_step)
+            (arrow.get(self.end_date) - arrow.get(self.pivot_date)).days / date_step)
 
-        start_date = min_date.shift(days=self.min_num_in_stat_set)
+        start_date = min_date.shift(days=min_num_in_stat_set)
         for day_delta in range(nwindows_bf_pivot):
             # >= start & < end
             windows.append(
                 {
                     "pivot_date": start_date.format('YYYY-MM-DD'),
-                    "days_in_label": self.days_in_label
+                    "days_in_label": days_in_label
                 }
             )
-            start_date = start_date.shift(days=self.date_step)
-        start_date = max_date.shift(days=self.date_step)
-        ndays_unit_af_pivot = self.days_in_label - self.days_in_label % self.date_step
+            start_date = start_date.shift(days=date_step)
+        start_date = max_date.shift(days=date_step)
+        ndays_unit_af_pivot = days_in_label - days_in_label % date_step
         for day_delta in range(nwindows_af_pivot):
-            adaptive_len = ndays_unit_af_pivot - (day_delta * self.date_step)
+            adaptive_len = ndays_unit_af_pivot - (day_delta * date_step)
             windows.append(
                 {
                     "pivot_date": start_date.format('YYYY-MM-DD'),
                     "days_in_label": adaptive_len
                 }
             )
-            start_date = start_date.shift(days=self.date_step)
+            start_date = start_date.shift(days=date_step)
         print('nwindows_bf_pivot:{}, nwindows_af_pivot {}'
               .format(nwindows_bf_pivot, nwindows_af_pivot))
         print('First window {}'.format(windows[0]))
@@ -402,7 +405,7 @@ class AggTsFeas(luigi.Task):
             for input_line in self.input()
         ]
         dataset = pd.concat(feats)
-        dataset.to_feather(self.output().path)
+        dataset.reset_index().to_feather(self.output().path)
 
 
 def dataset_split(data_raw):
