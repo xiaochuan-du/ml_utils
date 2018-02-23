@@ -293,7 +293,7 @@ class AggTsFeas(luigi.Task):
         * :py:class:`~.AggregateArtistsHadoop` if :py:attr:`~/.Top10Artists.use_hadoop` is set.
         :return: object (:py:class:`luigi.task.Task`)
         """
-        periods = ['7d', '10d', '14d', '21d', '30d', '60d', '90d', '180d', '360d', '720d']
+        periods = ['30d', '45d', '50d', '60d', '90d', '120d', '180d', '360d', '720d']
         return [StoreDowTsFeas(prd) for prd in periods] + [StoreTsFeas(prd) for prd in periods] + [GenreDowTsFeas(prd) for prd in periods]
 
     def output(self):
@@ -442,11 +442,34 @@ class DataSplits(luigi.Task):
         return luigi.LocalTarget('{}_datasplits.pkl'.format(RESULT))
 
     def run(self):
+        data = {
+            'as': pd.read_csv('{}air_store_info.csv'.format(PATH)),
+            'hs': pd.read_csv('{}hpg_store_info.csv'.format(PATH)),
+            'ar': pd.read_csv('{}air_reserve.csv'.format(PATH)),
+            'hr': pd.read_csv('{}hpg_reserve.csv'.format(PATH)),
+            'id': pd.read_csv('{}store_id_relation.csv'.format(PATH)),
+        }
+        air_res = data['ar'].assign(is_air_res=True)
+        hpg_res = pd.merge(
+            data['hr'].assign(is_air_res=False), 
+            data['id']).drop('hpg_store_id', axis='columns')
+        reserve = pd.concat( [hpg_res, air_res], axis=0)
+        reserve['visit_datetime'] = pd.to_datetime(reserve['visit_datetime'])
+        reserve['visit_datetime'] = reserve['visit_datetime'].dt.date
+        reserve['reserve_datetime'] = pd.to_datetime(reserve['reserve_datetime'])
+        reserve['reserve_datetime'] = reserve['reserve_datetime'].dt.date
+        reserve['reserve_datetime_diff'] = reserve.apply(lambda r: (r['visit_datetime'] - r['reserve_datetime']).days, axis=1)
+        tmp1 = reserve.groupby(['air_store_id','visit_datetime', 'is_air_res'], as_index=False)[['reserve_datetime_diff', 'reserve_visitors']].sum().rename(columns={'visit_datetime':'visit_date', 'reserve_datetime_diff': 'rs1', 'reserve_visitors':'rv1'})
+        tmp2 = reserve.groupby(['air_store_id','visit_datetime', 'is_air_res'], as_index=False)[['reserve_datetime_diff', 'reserve_visitors']].mean().rename(columns={'visit_datetime':'visit_date', 'reserve_datetime_diff': 'rs2', 'reserve_visitors':'rv2'})
+        reserve = pd.merge(tmp1, tmp2, how='inner', on=['air_store_id','visit_date', 'is_air_res'])
+        print(reserve.columns)
         dataset = pd.read_feather(self.input().path)
+        dataset = pd.merge(dataset, reserve, how='left', on=['air_store_id','visit_date'])
         contin_vars = pkl.load(
             open(f'{RESULT}_agg_feas_contin_vars.pkl', 'rb'))
         cat_vars = pkl.load(open(f'{RESULT}_agg_feas_cat_vars.pkl', 'rb'))
 
+        dataset.dropna(how='all', axis=1, inplace=True)
         train_set, valid_set, test_set = dataset_split(dataset)
         dep = 'visitors'
 
@@ -465,12 +488,17 @@ class DataSplits(luigi.Task):
         valid_set = valid_set.set_index("visit_date")
         train_set = train_set.set_index("visit_date")
         test_set = test_set.set_index("visit_date")
-        to_drop = ['rolling_air_store_id_visit_Dayofweek_14d_skew' ,'rolling_air_store_id_visit_Dayofweek_7d_skew', 'rolling_air_store_id_visit_Dayofweek_10d_skew', 'rolling_genre_name_air_loc_visit_Dayofweek_7d_std', 'rolling_genre_name_air_loc_visit_Dayofweek_10d_skew', 'rolling_air_store_id_visit_Dayofweek_7d_std', 'rolling_genre_name_air_loc_visit_Dayofweek_7d_skew', 'rolling_genre_name_air_loc_visit_Dayofweek_14d_skew']
-        train_set.drop(to_drop, axis=1, inplace=True, errors='ignore')
-        valid_set.drop(to_drop, axis=1, inplace=True, errors='ignore')
-        test_set.drop(to_drop, axis=1, inplace=True, errors='ignore')
-        contin_vars = list(set(contin_vars) - set(to_drop))
-        cat_vars = list(set(cat_vars) - set(to_drop))
+        # to_drop = ['rolling_air_store_id_visit_Dayofweek_14d_skew' ,'rolling_air_store_id_visit_Dayofweek_7d_skew', 'rolling_air_store_id_visit_Dayofweek_10d_skew', 'rolling_genre_name_air_loc_visit_Dayofweek_7d_std', 'rolling_genre_name_air_loc_visit_Dayofweek_10d_skew', 'rolling_air_store_id_visit_Dayofweek_7d_std', 'rolling_genre_name_air_loc_visit_Dayofweek_7d_skew', 'rolling_genre_name_air_loc_visit_Dayofweek_14d_skew', 'rolling_air_store_id_45d_std']
+        # train_set.drop(to_drop, axis=1, inplace=True, errors='ignore')
+        # valid_set.drop(to_drop, axis=1, inplace=True, errors='ignore')
+        # test_set.drop(to_drop, axis=1, inplace=True, errors='ignore')
+        to_drop = []
+        # train_set.dropna(how='all', axis=1, inplace=True)
+        # valid_set.dropna(how='all', axis=1, inplace=True)
+        # test_set.dropna(how='all', axis=1, inplace=True)
+        test_set = test_set.assign(visitors=0)
+        contin_vars = list(set(contin_vars) & set(train_set.columns))
+        cat_vars = list(set(cat_vars) & set(train_set.columns))
         df, y, nas, mapper = proc_df(train_set, 'visitors', do_scale=True)
         yl = np.log1p(y)
         df_val, y_val, _, _ = proc_df(valid_set, 'visitors', do_scale=True,  # skip_flds=['Id'],
