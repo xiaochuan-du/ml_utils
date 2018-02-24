@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 # This Python 3 environment comes with many helpful analytics libraries installed
 # It is defined by the kaggle/python docker image: https://github.com/kaggle/docker-python
 # For example, here's several helpful packages to load in 
@@ -11,7 +13,9 @@ from datetime import date, timedelta
 from sklearn.preprocessing import LabelEncoder
 
 
-data_path = r'/Users/kevindu/Documents/workspace/ai/data/RRVF/' # r'E:\workspace\ai\ml_utils\proj\RRVF\data\\'
+print('start')
+
+data_path = r'data/' # r'E:\workspace\ai\ml_utils\proj\RRVF\data\\'
 
 air_reserve = pd.read_csv(data_path + 'air_reserve.csv').rename(columns={'air_store_id':'store_id'})
 hpg_reserve = pd.read_csv(data_path + 'hpg_reserve.csv').rename(columns={'hpg_store_id':'store_id'})
@@ -53,6 +57,7 @@ data['visitors'] = np.log1p(data['visitors'])
 data = data.merge(air_store,on='store_id',how='left')
 data = data.merge(date_info[['visit_date','holiday_flg','holiday_flg2']], on=['visit_date'],how='left')
 
+print('preprocessing done')
 ###################################### function #########################################
 def concat(L):
     result = None
@@ -63,7 +68,7 @@ def concat(L):
             try:
                 result[l.columns.tolist()] = l
             except:
-                print(l.head())
+                print(l.head(), file=f)
     return result
 
 def left_merge(data1,data2,on):
@@ -397,156 +402,47 @@ def make_feats(end_date,n_day):
     print('spending {}s'.format(time.time() - t0))
     return result
 
-
-#%%
-i = 0
-n_day = 39
-start_date = '2017-03-12'
-end_date = date_add_days(start_date, i*(-7))
-
-t0 = time.time()
-key = end_date,n_day
-print('data key为：{}'.format(key))
-print('add label')
-label = get_label(end_date,n_day)
-
-#%%
 import datetime
+
+
 train_feat = pd.DataFrame()
 start_date = '2017-03-12'
-# window length 39
-# backward
-# step length a week
-def make_feats_mock(end_date,n_day):
-    t0 = time.time()
-    key = end_date,n_day
-    print('data key为：{}'.format(key))
-    print('add label')
-    label = get_label(end_date,n_day)
-    return label
-
 for i in range(58):
-    train_feat_sub = make_feats_mock(date_add_days(start_date, i*(-7)),39)
+    train_feat_sub = make_feats(date_add_days(start_date, i*(-7)),39)
     train_feat = pd.concat([train_feat,train_feat_sub])
+
 for i in range(1,6):
-    train_feat_sub = make_feats_mock(date_add_days(start_date,i*(7)),42-(i*7))
+    train_feat_sub = make_feats(date_add_days(start_date,i*(7)),42-(i*7))
     train_feat = pd.concat([train_feat,train_feat_sub])
-train_feat.head()
+test_feat = make_feats(date_add_days(start_date, 42),39)
 
+test_feat.reset_index().to_feather('result/org_test')
+train_feat.reset_index().to_feather('result/org_trn')
 
-#%%
-a_store = train_feat[train_feat.store_id == 'air_ba937bf13d40fb24']
-from pandas_summary import DataFrameSummary
-DataFrameSummary(a_store).summary().T
-#%%
-import matplotlib.pyplot as plt
-%matplotlib inline 
+predictors = [f for f in test_feat.columns if f not in (['id','store_id','visit_date','end_date','air_area_name','visitors','month'])]
+import lightgbm as lgb
+params = {
+    'learning_rate': 0.02,
+    'boosting_type': 'gbdt',
+    'objective': 'regression',
+    'metric': 'rmse',
+    'sub_feature': 0.7,
+    'num_leaves': 60,
+    'min_data': 100,
+    'min_hessian': 1,
+    'verbose': -1,
+}
 
-avg = result.iloc[:352]
-raw = data.iloc[:352]
-plt.plot(avg.store_exp_mean1000.values, 'y')
-plt.plot(raw.visitors.values, 'b')
+t0 = time.time()
+lgb_train = lgb.Dataset(train_feat[predictors], train_feat['visitors'])
+lgb_test = lgb.Dataset(test_feat[predictors], test_feat['visitors'])
 
-#%%
-len(data_temp[data_temp.store_id == 'air_ba937bf13d40fb24'])
+gbm = lgb.train(params,lgb_train,2300)
+pred = gbm.predict(test_feat[predictors])
 
+print('训练用时{}秒'.format(time.time() - t0))
+subm = pd.DataFrame({'id':test_feat.store_id + '_' + test_feat.visit_date,'visitors':np.expm1(pred)})
+subm = submission[['id']].merge(subm,on='id',how='left').fillna(0)
+subm.to_csv(r'./sub{}.csv'.format(datetime.datetime.now().strftime('%Y%m%d_%H%M%S')),
+                  index=False,  float_format='%.4f')
 
-#%%
-data_temp.head()
-#%%
-n_day = 1000
-start_date = date_add_days(key[0], -n_day)
-data_temp = data[(data.visit_date < key[0]) & (data.visit_date > start_date)].copy()
-data_temp['visit_date'] = data_temp['visit_date'].apply(lambda x: diff_of_days(key[0],x))
-data_temp['weight'] = data_temp['visit_date'].apply(lambda x: 0.985**x)
-data_temp['visitors'] = data_temp['visitors'] * data_temp['weight']
-result1 = data_temp.groupby(['store_id'], as_index=False)['visitors'].agg({'store_exp_mean{}'.format(n_day): 'sum'})
-result2 = data_temp.groupby(['store_id'], as_index=False)['weight'].agg({'store_exp_weight_sum{}'.format(n_day): 'sum'})
-result = result1.merge(result2, on=['store_id'], how='left')
-result['store_exp_mean{}'.format(n_day)] = result['store_exp_mean{}'.format(n_day)]/result['store_exp_weight_sum{}'.format(n_day)]
-result = left_merge(label, result, on=['store_id']).fillna(0)
-result.head()
-
-# import datetime
-
-
-# train_feat = pd.DataFrame()
-# start_date = '2017-03-12'
-# window length 39, due to the fact that test length is 39
-# backward
-# step length a week
-# the reason why do so is that performance / memory consideration
-# for i in range(58):
-#     train_feat_sub = make_feats(date_add_days(start_date, i*(-7)),39)
-#     train_feat = pd.concat([train_feat,train_feat_sub])
-
-# window length 42 - i*7
-# forward
-# step lenght a week
-
-# questions
-# why take an adjusted step length?
-# why breaking from '2017-03-12'? 
-
-# for i in range(1,6):
-#     train_feat_sub = make_feats(date_add_days(start_date,i*(7)),42-(i*7))
-#     train_feat = pd.concat([train_feat,train_feat_sub])
-# test_feat = make_feats(date_add_days(start_date, 42),39)
-
-# #%%
-# train_feat.head()
-
-# predictors = [f for f in test_feat.columns if f not in (['id','store_id','visit_date','end_date','air_area_name','visitors','month'])]
-# import lightgbm as lgb
-# params = {
-#     'learning_rate': 0.02,
-#     'boosting_type': 'gbdt',
-#     'objective': 'regression',
-#     'metric': 'rmse',
-#     'sub_feature': 0.7,
-#     'num_leaves': 60,
-#     'min_data': 100,
-#     'min_hessian': 1,
-#     'verbose': -1,
-# }
-
-# t0 = time.time()
-# lgb_train = lgb.Dataset(train_feat[predictors], train_feat['visitors'])
-# lgb_test = lgb.Dataset(test_feat[predictors], test_feat['visitors'])
-
-# gbm = lgb.train(params,lgb_train,2300)
-# pred = gbm.predict(test_feat[predictors])
-
-# print('训练用时{}秒'.format(time.time() - t0))
-# subm = pd.DataFrame({'id':test_feat.store_id + '_' + test_feat.visit_date,'visitors':np.expm1(pred)})
-# subm = submission[['id']].merge(subm,on='id',how='left').fillna(0)
-# subm.to_csv(r'..\sub{}.csv'.format(datetime.datetime.now().strftime('%Y%m%d_%H%M%S')),
-#                   index=False,  float_format='%.4f')
-
-
-
-
-
-
-
-
-#%%
-import arrow
-import math
-
-pivot_date = '2017-03-12'
-date_step = 7
-ndays_in_test = 39
-
-ndays_unit_af_pivot = math.ceil(ndays_in_test / 7 )
-max_date = arrow.get(data[data.visit_date < pivot_date].visit_date.max())
-min_date = arrow.get(data[data.visit_date < pivot_date].visit_date.min())
-delta = (max_date - min_date).days
-print((delta - 39 ) / 7)
-
-#%%
-arrow.get(pivot_date).shift(days=-57*7)
-
-#%%
-arrow.get('2016-01-01') - arrow.get('2016-02-07')
-# arrow.get('2017-04-22') - arrow.get(pivot_date)
